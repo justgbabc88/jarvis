@@ -55,11 +55,20 @@ const CLIENT_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "get_today_agenda",
+    description:
+      "Today's calendar events and tasks due/overdue from the owner's connected calendar and task tool.",
+    input_schema: { type: "object" as const, properties: {} },
+  },
+  {
     name: "request_approval",
     description:
       "Queue an action that would send a message, post publicly, delete something, or spend money. " +
-      "It will NOT happen until the owner approves it in the app. Use this instead of claiming you did the action. " +
-      "Include everything needed to execute it later in `payload` (e.g. the full drafted email, the exact budget change).",
+      "It will NOT happen until the owner approves it in the app — but when they tap Approve it EXECUTES " +
+      "AUTOMATICALLY from `payload`, so the payload must be complete and exact. Executable payload formats:\n" +
+      '  email:       { "action": "email.send", "to": "a@b.com", "subject": "...", "body": "full text", "cc"?: "..." }\n' +
+      '  Meta budget: { "action": "meta.budget_update", "object_type": "adset"|"campaign", "object_id": "123", "daily_budget_cents": 5000 }\n' +
+      "Other actions have no executor yet — still queue them with a clear payload so the owner can act manually.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -67,7 +76,10 @@ const CLIENT_TOOLS: Anthropic.Tool[] = [
         title: { type: "string", description: "One-line description shown to the owner" },
         detail: { type: "string", description: "Full context: what, why, expected outcome" },
         amount_cents: { type: "number", description: "For 'spend': the amount in cents" },
-        payload: { type: "object", description: "Machine-usable details to execute on approval" },
+        payload: {
+          type: "object",
+          description: "Machine-executable details (see formats above). Runs as-is on approval.",
+        },
       },
       required: ["kind", "title"],
     },
@@ -105,6 +117,17 @@ async function execTool(name: string, input: any, ctx: RunContext): Promise<unkn
       spend_by_day: m.spendByDay.map((d) => ({ date: d.date, dollars: +(d.cents / 100).toFixed(2) })),
       connected: m.connected,
       errors: m.errors,
+    };
+  }
+
+  if (name === "get_today_agenda") {
+    const { getTodayAgenda } = await import("./agenda");
+    const agenda = await getTodayAgenda();
+    return {
+      events: agenda.events,
+      tasks: agenda.tasks,
+      connected: agenda.connected,
+      errors: agenda.errors,
     };
   }
 
@@ -147,6 +170,8 @@ function harnessPrompt(name: string, jobDescription: string): string {
     "- Use list_businesses / get_metrics for real numbers. Never invent figures.",
     "- Use web_search when the job needs outside information or research.",
     "- You can NEVER directly send, post, delete, or spend. For any such action, call request_approval with a fully-prepared draft/plan, and clearly report it as 'queued for approval' — not done.",
+    "- Approved actions execute automatically from your payload, so make payloads exact and complete (final email text, exact ids and amounts).",
+    "- Use get_today_agenda when the job involves the owner's schedule or task list.",
     "- Be concrete and brief. Prefer doing the work over describing the work.",
     "- Finish with a short report of what you found/did, in plain language, as if leaving a note for the owner.",
     `- Today is ${todayYmd()}; yesterday was ${yesterdayYmd()}.`,

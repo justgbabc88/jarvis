@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ask, anthropicConfigured } from "@/lib/anthropic";
 import { getBusinessCards, getYesterdayActivity, getActiveGoals } from "@/lib/data";
+import { getTodayAgenda, agendaToText } from "@/lib/agenda";
 import { money } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -17,10 +18,11 @@ export async function POST(req: NextRequest) {
   }
 
   // Assemble a compact, current picture for Jarvis to speak from.
-  const [cards, activity, goals] = await Promise.all([
+  const [cards, activity, goals, agenda] = await Promise.all([
     getBusinessCards(),
     getYesterdayActivity(),
     getActiveGoals(),
+    getTodayAgenda(),
   ]);
 
   const businessLines = cards
@@ -36,6 +38,7 @@ export async function POST(req: NextRequest) {
 
   const context = [
     `BUSINESSES (month-to-date):\n${businessLines || "none configured"}`,
+    agendaToText(agenda),
     `WHAT JARVIS DID YESTERDAY:\n${
       activity.map((a) => `- ${a.summary}`).join("\n") || "nothing logged"
     }`,

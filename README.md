@@ -10,7 +10,7 @@ no Retell, no paid service.
 > This lives as a self-contained project so it can be lifted into its own
 > `jarvis` repo at any time (`git subtree split --prefix jarvis`).
 
-## What's here today (Phases 0–4)
+## What's here today (Phases 0–5)
 
 - **Snapshot dashboard** — revenue + ad spend per business, month-to-date and today,
   net and ROAS, plus "what Jarvis did yesterday."
@@ -27,13 +27,18 @@ no Retell, no paid service.
   and a full step-by-step trace + report lands in run history and the activity feed.
 - **Approval gate** — agents *cannot* send, post, delete, or spend directly. The only
   path is a `request_approval` tool that queues the fully-drafted action for your tap.
+- **Action connectors** — approving an action **executes it**: email send (your own
+  SMTP/Gmail), Meta ad budget changes. The result is recorded on the approval and in
+  the activity feed.
+- **Calendar + tasks** — connect a private ICS feed (Google Calendar) and ClickUp;
+  the dashboard's "today" panel, voice answers, agents, and the briefing all see them.
+- **Daily briefing** — the worker auto-generates a spoken-style morning briefing
+  (default 7am, your timezone); one tap on the dashboard reads it aloud, free.
 
 ## What's next
 
-- **Action connectors** — executing approved actions (email, ad budget changes, …)
-  and letting agents use any MCP server you've connected.
-- **Calendar + tasks** for the "today" panel.
-- **Daily briefing** — an auto-generated, voiced morning summary.
+- More action executors (posting, ClickUp task creation, …) and letting agents use
+  any MCP server you've connected.
 
 ## Project layout
 
@@ -48,8 +53,8 @@ jarvis/
 
 ## Quick start (local)
 
-1. **Create a Supabase project** and run the migration in
-   `supabase/migrations/0001_init.sql` (SQL editor, or `supabase db push`).
+1. **Create a Supabase project** and run the migrations in
+   `supabase/migrations/` in order (SQL editor, or `supabase db push`).
 2. **Env**: copy `.env.example` → `apps/web/.env.local` and fill in Supabase +
    `ANTHROPIC_API_KEY` + `APP_PASSWORD` + `APP_SECRET` + `CREDENTIALS_ENC_KEY`
    (`openssl rand -base64 32`).
@@ -69,7 +74,13 @@ See [DEPLOY.md](./DEPLOY.md) for Vercel + Railway + Supabase deployment.
 - **NMI (revenue)** — uses the Query API with your gateway **security key**. Settled
   sales minus refunds, rolled up by day.
 - **Meta (ad spend)** — Marketing API insights for an **ad account** (`act_…`) with a
-  long-lived **access token**, per-day spend.
+  long-lived **access token**, per-day spend. The same connection powers approved
+  **budget changes**.
+- **Email (SMTP)** — action connector; approved `email.send` drafts go out through
+  your own mailbox (Gmail app password works great). Send-only, never reads mail.
+- **Calendar (ICS)** — your calendar's private iCal URL; feeds the today panel,
+  voice, agents, and the morning briefing. No OAuth needed.
+- **ClickUp (tasks)** — personal API token; shows tasks due today / overdue.
 
 Credentials are AES-256-GCM encrypted with `CREDENTIALS_ENC_KEY` before they touch the
 database, and are only ever decrypted server-side.

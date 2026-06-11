@@ -20,6 +20,9 @@ const CRON_SECRET = process.env.CRON_SECRET || "";
 const PORT = Number(process.env.WORKER_PORT || process.env.PORT || 8080);
 // How often to refresh the snapshot. Default: top of every hour.
 const SYNC_CRON = process.env.SYNC_CRON || "0 * * * *";
+// When to generate the morning briefing, in APP_TIMEZONE. Default: 7am daily.
+const BRIEFING_CRON = process.env.BRIEFING_CRON || "0 7 * * *";
+const APP_TIMEZONE = process.env.APP_TIMEZONE || "America/New_York";
 
 async function syncSnapshots(): Promise<void> {
   const url = `${APP_URL}/api/snapshot/sync`;
@@ -57,6 +60,25 @@ async function tickAgents(): Promise<void> {
   }
 }
 
+async function generateBriefing(): Promise<void> {
+  const url = `${APP_URL}/api/briefing`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${CRON_SECRET}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ force: true }),
+    });
+    const body: any = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.error(`[briefing] failed (${res.status})`, body);
+    } else {
+      console.log(`[briefing] ok — generated for ${body.briefing?.briefing_date}`);
+    }
+  } catch (err) {
+    console.error("[briefing] error reaching app:", err);
+  }
+}
+
 const app = Fastify({ logger: false });
 
 app.get("/health", async () => ({ ok: true, service: "jarvis-worker", time: new Date().toISOString() }));
@@ -84,6 +106,17 @@ async function main() {
   cron.schedule("* * * * *", () => {
     void tickAgents();
   });
+
+  // Morning briefing, evaluated in the owner's timezone so "7am" means 7am.
+  console.log(`[cron] briefing scheduled: "${BRIEFING_CRON}" (${APP_TIMEZONE})`);
+  cron.schedule(
+    BRIEFING_CRON,
+    () => {
+      console.log("[cron] generating morning briefing…");
+      void generateBriefing();
+    },
+    { timezone: APP_TIMEZONE }
+  );
 
   // Run one sync shortly after boot so data is fresh on deploy.
   setTimeout(() => void syncSnapshots(), 5000);

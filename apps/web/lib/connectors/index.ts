@@ -7,6 +7,9 @@ import { fetchMetaSpend, metaCredsFromEnv, MetaCreds } from "./meta";
 export * from "./types";
 export { fetchNmiRevenue } from "./nmi";
 export { fetchMetaSpend } from "./meta";
+export { fetchTodayEvents } from "./calendar";
+export { fetchDueTasks } from "./clickup";
+export { sendEmail, verifyEmail } from "./email";
 
 type ConnectionRow = {
   id: string;
@@ -24,6 +27,22 @@ function decodeCreds<T>(row: ConnectionRow | undefined): T | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * First connected connection of a provider, decrypted. Used by the
+ * agenda (calendar/clickup) and the action executor (email/meta).
+ */
+export async function getProviderCreds<T>(provider: string): Promise<T | null> {
+  const db = supabaseAdmin();
+  const { data } = await db
+    .from("connections")
+    .select("id, provider, credentials, config")
+    .eq("provider", provider)
+    .eq("status", "connected")
+    .order("created_at")
+    .limit(1);
+  return decodeCreds<T>((data as ConnectionRow[])?.[0]);
 }
 
 /**

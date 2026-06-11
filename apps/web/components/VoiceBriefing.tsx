@@ -16,7 +16,17 @@ export default function VoiceBriefing() {
   const [transcript, setTranscript] = useState("");
   const [answer, setAnswer] = useState("");
   const [supportsSTT, setSupportsSTT] = useState(true);
+  const [briefing, setBriefing] = useState<string | null>(null);
   const recogRef = useRef<any>(null);
+
+  // The worker generates the morning briefing on schedule; pick it up so
+  // "Daily briefing" plays instantly (and free) instead of re-asking Claude.
+  useEffect(() => {
+    fetch("/api/briefing")
+      .then((r) => r.json())
+      .then((d) => setBriefing(d.briefing?.content || null))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const SR =
@@ -77,6 +87,39 @@ export default function VoiceBriefing() {
     }
   }
 
+  async function playBriefing() {
+    // Stored briefing → speak immediately. Otherwise generate one now.
+    if (briefing) {
+      setTranscript("");
+      setAnswer(briefing);
+      speak(briefing);
+      return;
+    }
+    setThinking(true);
+    setAnswer("");
+    try {
+      const res = await fetch("/api/briefing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      const text = data.briefing?.content;
+      if (text) {
+        setBriefing(text);
+        setAnswer(text);
+        speak(text);
+      } else {
+        // No Claude key / error — fall back to the live voice endpoint.
+        ask("Give me my morning briefing across all my businesses.");
+      }
+    } catch {
+      ask("Give me my morning briefing across all my businesses.");
+    } finally {
+      setThinking(false);
+    }
+  }
+
   function startListening() {
     if (!recogRef.current) return;
     setTranscript("");
@@ -97,12 +140,8 @@ export default function VoiceBriefing() {
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          onClick={() => ask("Give me my morning briefing across all my businesses.")}
-          className="btn btn-primary"
-          disabled={thinking}
-        >
-          ▶︎ Daily briefing
+        <button onClick={playBriefing} className="btn btn-primary" disabled={thinking}>
+          ▶︎ {briefing ? "Play today's briefing" : "Daily briefing"}
         </button>
 
         {supportsSTT && (

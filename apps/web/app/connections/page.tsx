@@ -11,17 +11,42 @@ type Connection = {
   created_at: string;
 };
 
-const PROVIDERS: Record<string, { label: string; fields: { key: string; label: string; placeholder?: string }[] }> = {
+const PROVIDERS: Record<
+  string,
+  { label: string; hint?: string; fields: { key: string; label: string; placeholder?: string }[] }
+> = {
   nmi: {
     label: "NMI — revenue",
     fields: [{ key: "security_key", label: "Gateway security key", placeholder: "nmi security key" }],
   },
   meta: {
     label: "Meta — ad spend",
+    hint: "Also powers approved ad budget changes.",
     fields: [
       { key: "access_token", label: "Access token", placeholder: "long-lived token" },
       { key: "ad_account_id", label: "Ad account id", placeholder: "act_1234567890" },
     ],
+  },
+  email: {
+    label: "Email — send (SMTP)",
+    hint: "Used ONLY to send emails you've approved. Gmail: smtp.gmail.com + an app password.",
+    fields: [
+      { key: "host", label: "SMTP host", placeholder: "smtp.gmail.com" },
+      { key: "port", label: "Port", placeholder: "587" },
+      { key: "username", label: "Username", placeholder: "you@yourdomain.com" },
+      { key: "password", label: "Password / app password" },
+      { key: "from", label: "From address (optional)", placeholder: "defaults to username" },
+    ],
+  },
+  calendar_ics: {
+    label: "Calendar — ICS feed",
+    hint: "Google Calendar → Settings → your calendar → “Secret address in iCal format”.",
+    fields: [{ key: "ics_url", label: "Private ICS URL", placeholder: "https://calendar.google.com/calendar/ical/…/basic.ics" }],
+  },
+  clickup: {
+    label: "ClickUp — tasks",
+    hint: "ClickUp → Settings → Apps → API token.",
+    fields: [{ key: "api_token", label: "API token", placeholder: "pk_…" }],
   },
 };
 
@@ -92,7 +117,7 @@ export default function ConnectionsPage() {
       </div>
 
       <form onSubmit={save} className="card space-y-3">
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {Object.entries(PROVIDERS).map(([key, p]) => (
             <button
               type="button"
@@ -109,6 +134,10 @@ export default function ConnectionsPage() {
           ))}
         </div>
 
+        {PROVIDERS[provider].hint && (
+          <p className="text-xs text-muted">{PROVIDERS[provider].hint}</p>
+        )}
+
         <div>
           <label className="mb-1 block text-sm text-muted">Label</label>
           <input
@@ -124,7 +153,11 @@ export default function ConnectionsPage() {
             <label className="mb-1 block text-sm text-muted">{f.label}</label>
             <input
               className="input"
-              type={f.key.includes("token") || f.key.includes("key") ? "password" : "text"}
+              type={
+                f.key.includes("token") || f.key.includes("key") || f.key.includes("password")
+                  ? "password"
+                  : "text"
+              }
               value={creds[f.key] || ""}
               placeholder={f.placeholder}
               onChange={(e) => setCreds({ ...creds, [f.key]: e.target.value })}
