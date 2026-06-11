@@ -20,6 +20,7 @@ export default function GoalsPage() {
   const [desc, setDesc] = useState("");
   const [date, setDate] = useState("");
   const [busyGoal, setBusyGoal] = useState<string | null>(null);
+  const [busySuggestion, setBusySuggestion] = useState<string | null>(null);
 
   async function load() {
     const res = await fetch("/api/goals");
@@ -53,11 +54,13 @@ export default function GoalsPage() {
   }
 
   async function decide(suggestionId: string, decision: "approved" | "rejected") {
+    setBusySuggestion(suggestionId);
     await fetch(`/api/suggestions/${suggestionId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ decision }),
     });
+    setBusySuggestion(null);
     load();
   }
 
@@ -129,10 +132,18 @@ export default function GoalsPage() {
                         </div>
                         {s.status === "proposed" ? (
                           <div className="flex gap-2">
-                            <button className="btn btn-primary" onClick={() => decide(s.id, "approved")}>
-                              Approve
+                            <button
+                              className="btn btn-primary"
+                              disabled={busySuggestion === s.id}
+                              onClick={() => decide(s.id, "approved")}
+                            >
+                              {busySuggestion === s.id ? "Jarvis is on it…" : "Approve & run"}
                             </button>
-                            <button className="btn text-bad" onClick={() => decide(s.id, "rejected")}>
+                            <button
+                              className="btn text-bad"
+                              disabled={busySuggestion === s.id}
+                              onClick={() => decide(s.id, "rejected")}
+                            >
                               Skip
                             </button>
                           </div>

@@ -20,6 +20,17 @@ export async function middleware(req: NextRequest) {
   // If no password is configured, the app is open (local dev).
   if (!process.env.APP_PASSWORD) return NextResponse.next();
 
+  // The Railway worker authenticates with a bearer token, not a cookie.
+  // Let those requests through to the route, which validates the secret itself.
+  const bearer = req.headers.get("authorization");
+  if (
+    process.env.CRON_SECRET &&
+    bearer === `Bearer ${process.env.CRON_SECRET}` &&
+    pathname.startsWith("/api/")
+  ) {
+    return NextResponse.next();
+  }
+
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   if (await isValidSession(token)) return NextResponse.next();
 

@@ -10,7 +10,7 @@ no Retell, no paid service.
 > This lives as a self-contained project so it can be lifted into its own
 > `jarvis` repo at any time (`git subtree split --prefix jarvis`).
 
-## What's here today (Phase 0 + 1 + Voice)
+## What's here today (Phases 0–4)
 
 - **Snapshot dashboard** — revenue + ad spend per business, month-to-date and today,
   net and ROAS, plus "what Jarvis did yesterday."
@@ -19,14 +19,20 @@ no Retell, no paid service.
 - **Businesses are settings, not code** — add/remove any business from Settings.
   Nothing is hardcoded.
 - **Voice** — ask out loud (or type) and Jarvis answers, read back by your browser.
-- **Goals** — set a goal; Claude proposes revenue moves + research; approve to queue.
-- **Approval gate** — anything that sends, posts, deletes, or spends waits for your tap.
+- **Goals** — set a goal; Claude proposes revenue moves + research; approve one and
+  Jarvis runs it immediately as a one-off agent job.
+- **Agents** — describe a job in plain English, deploy it on a schedule (hourly,
+  daily 9am, weekdays, or custom cron — evaluated in your timezone). Agents run a
+  Claude tool-use loop with access to your real business numbers and **web search**,
+  and a full step-by-step trace + report lands in run history and the activity feed.
+- **Approval gate** — agents *cannot* send, post, delete, or spend directly. The only
+  path is a `request_approval` tool that queues the fully-drafted action for your tap.
 
 ## What's next
 
-- **Agents** — describe a job in plain English, pick connected tools/MCP servers,
-  deploy on a schedule (runs on the Railway worker), with every action gated by approvals.
-- **More connectors** — calendar + tasks for the "today" panel, and any MCP server.
+- **Action connectors** — executing approved actions (email, ad budget changes, …)
+  and letting agents use any MCP server you've connected.
+- **Calendar + tasks** for the "today" panel.
 - **Daily briefing** — an auto-generated, voiced morning summary.
 
 ## Project layout
