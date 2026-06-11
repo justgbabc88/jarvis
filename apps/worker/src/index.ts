@@ -1,0 +1,71 @@
+import Fastify from "fastify";
+import cron from "node-cron";
+
+/**
+ * Jarvis worker (Railway).
+ *
+ * Responsibilities:
+ *  1. Keep the business snapshot fresh by asking the web app to sync
+ *     revenue (NMI) + ad spend (Meta) on a schedule.
+ *  2. (Next phase) Run deployed agents on their own cron schedules and
+ *     execute approved actions.
+ *
+ * The web app owns all the connector + DB logic, so the worker stays thin
+ * and calls back into it over HTTP with a shared CRON_SECRET.
+ */
+
+const APP_URL = process.env.APP_URL || "http://localhost:3000";
+const CRON_SECRET = process.env.CRON_SECRET || "";
+const PORT = Number(process.env.WORKER_PORT || process.env.PORT || 8080);
+// How often to refresh the snapshot. Default: top of every hour.
+const SYNC_CRON = process.env.SYNC_CRON || "0 * * * *";
+
+async function syncSnapshots(): Promise<void> {
+  const url = `${APP_URL}/api/snapshot/sync`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${CRON_SECRET}`, "Content-Type": "application/json" },
+    });
+    const body: any = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.error(`[sync] failed (${res.status})`, body);
+    } else {
+      console.log(`[sync] ok — updated ${body.updated} businesses`);
+    }
+  } catch (err) {
+    console.error("[sync] error reaching app:", err);
+  }
+}
+
+const app = Fastify({ logger: false });
+
+app.get("/health", async () => ({ ok: true, service: "jarvis-worker", time: new Date().toISOString() }));
+
+// Manual trigger (handy for testing): POST /run/sync with the cron secret.
+app.post("/run/sync", async (req, reply) => {
+  if (CRON_SECRET && req.headers.authorization !== `Bearer ${CRON_SECRET}`) {
+    return reply.code(401).send({ error: "unauthorized" });
+  }
+  await syncSnapshots();
+  return { ok: true };
+});
+
+async function main() {
+  await app.listen({ port: PORT, host: "0.0.0.0" });
+  console.log(`jarvis-worker listening on :${PORT}`);
+  console.log(`[cron] snapshot sync scheduled: "${SYNC_CRON}" (app: ${APP_URL})`);
+
+  cron.schedule(SYNC_CRON, () => {
+    console.log("[cron] running snapshot sync…");
+    void syncSnapshots();
+  });
+
+  // Run one sync shortly after boot so data is fresh on deploy.
+  setTimeout(() => void syncSnapshots(), 5000);
+}
+
+main().catch((err) => {
+  console.error("worker failed to start:", err);
+  process.exit(1);
+});
