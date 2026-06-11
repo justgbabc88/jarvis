@@ -29,7 +29,7 @@ Three pieces: **Supabase** (database), **Vercel** (web app), **Railway** (worker
    APP_SECRET            # random string, signs the session cookie
    CREDENTIALS_ENC_KEY   # openssl rand -base64 32
    CRON_SECRET           # random string, shared with the worker
-   APP_TIMEZONE=America/New_York
+   APP_TIMEZONE=America/Chicago
    ```
 5. Deploy. Visit the URL, log in with `APP_PASSWORD`.
 
@@ -47,7 +47,7 @@ Three pieces: **Supabase** (database), **Vercel** (web app), **Railway** (worker
    CRON_SECRET=<same value as Vercel>
    SYNC_CRON=0 * * * *          # hourly snapshot refresh (optional)
    BRIEFING_CRON=0 7 * * *      # morning briefing time (optional)
-   APP_TIMEZONE=America/New_York
+   APP_TIMEZONE=America/Chicago
    PORT=8080
    ```
 5. Deploy. Check the logs for `jarvis-worker listening` and `[sync] ok`.
