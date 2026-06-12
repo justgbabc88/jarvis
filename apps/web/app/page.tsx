@@ -6,7 +6,6 @@ import {
   getPendingApprovals,
   getActiveGoals,
 } from "@/lib/data";
-import { money } from "@/lib/format";
 import { relativeDay } from "@/lib/format";
 import VoiceBriefing from "@/components/VoiceBriefing";
 import BusinessCardView from "@/components/BusinessCardView";
@@ -36,9 +35,6 @@ export default async function Dashboard() {
     getActiveGoals(),
   ]);
 
-  const totalRevenue = cards.reduce((a, c) => a + c.monthRevenueCents, 0);
-  const totalSpend = cards.reduce((a, c) => a + c.monthSpendCents, 0);
-
   return (
     <div className="space-y-6">
       <VoiceBriefing />
@@ -60,24 +56,7 @@ export default async function Dashboard() {
         </Link>
       )}
 
-      {/* Top-line snapshot */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="grid grid-cols-2 gap-6 sm:grid-cols-3">
-          <div>
-            <div className="card-title">Revenue · this month</div>
-            <div className="stat text-good">{money(totalRevenue)}</div>
-          </div>
-          <div>
-            <div className="card-title">Ad spend · this month</div>
-            <div className="stat text-bad">{money(totalSpend)}</div>
-          </div>
-          <div>
-            <div className="card-title">Net</div>
-            <div className={`stat ${totalRevenue - totalSpend >= 0 ? "text-good" : "text-bad"}`}>
-              {money(totalRevenue - totalSpend)}
-            </div>
-          </div>
-        </div>
+      <div className="flex justify-end">
         <SyncButton />
       </div>
 
