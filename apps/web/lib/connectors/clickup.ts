@@ -11,7 +11,9 @@ import { ymd, appTimezone } from "../time";
 
 const API = "https://api.clickup.com/api/v2";
 
-export type ClickUpCreds = { api_token: string };
+export type ClickUpCreds = { api_token: string; list_id?: string; list_name?: string };
+
+export type ClickUpList = { id: string; name: string };
 
 export type ClickUpTask = {
   id: string;
@@ -37,22 +39,39 @@ export async function clickupWhoAmI(creds: ClickUpCreds): Promise<{ id: number; 
   return j.user;
 }
 
-export async function fetchClickUpTodayTasks(creds: ClickUpCreds): Promise<ClickUpTask[]> {
-  const me = await clickupWhoAmI(creds);
-  const teams = (await cu("/team", creds.api_token)).teams || [];
+/** Every list across all teams/spaces, labeled "Space / Folder / List". */
+export async function fetchClickUpLists(creds: ClickUpCreds): Promise<ClickUpList[]> {
+  const token = creds.api_token;
+  const out: ClickUpList[] = [];
+  const teams = (await cu("/team", token)).teams || [];
+  for (const team of teams) {
+    const spaces = (await cu(`/team/${team.id}/space?archived=false`, token)).spaces || [];
+    for (const space of spaces) {
+      const [folders, folderless] = await Promise.all([
+        cu(`/space/${space.id}/folder?archived=false`, token),
+        cu(`/space/${space.id}/list?archived=false`, token),
+      ]);
+      for (const list of folderless.lists || []) {
+        out.push({ id: String(list.id), name: `${space.name} / ${list.name}` });
+      }
+      for (const folder of folders.folders || []) {
+        for (const list of folder.lists || []) {
+          out.push({ id: String(list.id), name: `${space.name} / ${folder.name} / ${list.name}` });
+        }
+      }
+    }
+  }
+  return out;
+}
 
+export async function fetchClickUpTodayTasks(creds: ClickUpCreds): Promise<ClickUpTask[]> {
   // End of today in the app timezone, as epoch ms.
   const endOfToday = new Date(`${ymd(new Date(), appTimezone())}T23:59:59`);
   const endMs = endOfToday.getTime();
   const startOfTodayMs = endMs - 86399000;
 
-  const tasks: ClickUpTask[] = [];
-  for (const t of teams) {
-    const j = await cu(
-      `/team/${t.id}/task?due_date_lt=${endMs + 1}&include_closed=false&assignees[]=${me.id}&order_by=due_date`,
-      creds.api_token
-    );
-    for (const task of j.tasks || []) {
+  const pushTasks = (tasks: ClickUpTask[], rows: any[]) => {
+    for (const task of rows) {
       const dueMs = task.due_date ? Number(task.due_date) : null;
       tasks.push({
         id: task.id,
@@ -63,6 +82,27 @@ export async function fetchClickUpTodayTasks(creds: ClickUpCreds): Promise<Click
         overdue: dueMs !== null && dueMs < startOfTodayMs,
         url: task.url,
       });
+    }
+  };
+
+  const tasks: ClickUpTask[] = [];
+  if (creds.list_id) {
+    // Scoped to one list: every open task due today or overdue, any assignee.
+    const j = await cu(
+      `/list/${creds.list_id}/task?due_date_lt=${endMs + 1}&include_closed=false&order_by=due_date`,
+      creds.api_token
+    );
+    pushTasks(tasks, j.tasks || []);
+  } else {
+    // All lists: open tasks assigned to the token's user.
+    const me = await clickupWhoAmI(creds);
+    const teams = (await cu("/team", creds.api_token)).teams || [];
+    for (const t of teams) {
+      const j = await cu(
+        `/team/${t.id}/task?due_date_lt=${endMs + 1}&include_closed=false&assignees[]=${me.id}&order_by=due_date`,
+        creds.api_token
+      );
+      pushTasks(tasks, j.tasks || []);
     }
   }
   tasks.sort((a, b) => (a.dueMs || 0) - (b.dueMs || 0));

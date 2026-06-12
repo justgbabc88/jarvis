@@ -34,7 +34,9 @@ export async function POST(req: NextRequest) {
       const tasks = await fetchClickUpTodayTasks(credentials);
       return NextResponse.json({
         ok: true,
-        message: `Connected as ${user.username}. ${tasks.length} task(s) due today or overdue.`,
+        message: `Connected as ${user.username}. ${tasks.length} task(s) due today or overdue${
+          credentials.list_name ? ` in "${credentials.list_name}"` : ""
+        }.`,
       });
     }
     if (provider === "google_calendar") {

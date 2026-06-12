@@ -48,6 +48,30 @@ export default function ConnectionsPage() {
   const [creds, setCreds] = useState<Record<string, string>>({});
   const [testMsg, setTestMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const [cuLists, setCuLists] = useState<{ id: string; name: string }[]>([]);
+  const [cuListsMsg, setCuListsMsg] = useState("");
+
+  async function loadClickUpLists() {
+    if (!creds.api_token) {
+      setCuListsMsg("Enter your API token first.");
+      return;
+    }
+    setBusy(true);
+    setCuListsMsg("Loading lists…");
+    const res = await fetch("/api/connections/clickup-lists", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_token: creds.api_token }),
+    });
+    const data = await res.json();
+    setBusy(false);
+    if (data.lists) {
+      setCuLists(data.lists);
+      setCuListsMsg(`${data.lists.length} list(s) found.`);
+    } else {
+      setCuListsMsg(data.error || "Couldn't load lists.");
+    }
+  }
 
   async function load() {
     const res = await fetch("/api/connections");
@@ -147,6 +171,41 @@ export default function ConnectionsPage() {
             />
           </div>
         ))}
+
+        {provider === "clickup" && (
+          <div>
+            <label className="mb-1 block text-sm text-muted">Pull tasks from</label>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                className="input max-w-xs"
+                value={creds.list_id || ""}
+                onChange={(e) => {
+                  const list = cuLists.find((l) => l.id === e.target.value);
+                  const next = { ...creds };
+                  if (list) {
+                    next.list_id = list.id;
+                    next.list_name = list.name;
+                  } else {
+                    delete next.list_id;
+                    delete next.list_name;
+                  }
+                  setCreds(next);
+                }}
+              >
+                <option value="">All lists (tasks assigned to me)</option>
+                {cuLists.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="btn" onClick={loadClickUpLists} disabled={busy}>
+                Load lists
+              </button>
+              {cuListsMsg && <span className="text-xs text-muted">{cuListsMsg}</span>}
+            </div>
+          </div>
+        )}
 
         <div className="flex items-center gap-2">
           <button type="button" className="btn" onClick={test} disabled={busy}>
