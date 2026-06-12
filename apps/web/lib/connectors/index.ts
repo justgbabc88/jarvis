@@ -100,13 +100,21 @@ export async function getBusinessMetrics(
     }
   }
   if (meta) {
-    try {
-      const s = await fetchMetaSpend(meta, range);
-      adSpendCents = s.totalCents;
-      spendByDay = s.byDay;
-    } catch (e: any) {
-      errors.push(`Meta: ${e.message}`);
+    // A business can aggregate several ad accounts (comma/space separated).
+    const accounts = meta.ad_account_id.split(/[,\s]+/).filter(Boolean);
+    const byDate = new Map<string, number>();
+    for (const account of accounts) {
+      try {
+        const s = await fetchMetaSpend({ ...meta, ad_account_id: account }, range);
+        adSpendCents += s.totalCents;
+        for (const d of s.byDay) byDate.set(d.date, (byDate.get(d.date) || 0) + d.cents);
+      } catch (e: any) {
+        errors.push(`Meta (${account}): ${e.message}`);
+      }
     }
+    spendByDay = [...byDate.entries()]
+      .map(([date, cents]) => ({ date, cents }))
+      .sort((a, b) => a.date.localeCompare(b.date));
   }
 
   return {

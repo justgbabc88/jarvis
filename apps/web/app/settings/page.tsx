@@ -93,13 +93,13 @@ function BusinessConnections({
         </select>
       </div>
       <div>
-        <label className="mb-1 block text-xs text-muted">Meta ad account id</label>
+        <label className="mb-1 block text-xs text-muted">Meta ad account id(s) — comma-separated to combine</label>
         <div className="flex gap-2">
           <input
             className="input"
             value={adAccount}
             onChange={(e) => setAdAccount(e.target.value)}
-            placeholder="act_1234567890"
+            placeholder="act_123, act_456"
           />
           <button className="btn btn-primary shrink-0" onClick={save} disabled={saving}>
             {saving ? "…" : saved ? "Saved ✓" : "Save"}
