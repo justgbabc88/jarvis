@@ -44,8 +44,15 @@ async function resolveCreds(businessId: string): Promise<{
   const settings = (business?.settings as any) || {};
   const conns = (connections as ConnectionRow[]) || [];
 
-  const pick = (provider: string, preferredId?: string) =>
-    conns.find((c) => c.id === preferredId) || conns.find((c) => c.provider === provider);
+  // "none" detaches the provider; an explicit id wins; otherwise only
+  // auto-attach when there's exactly one connection of that provider —
+  // sharing one gateway across businesses double-counts its numbers.
+  const pick = (provider: string, preferredId?: string) => {
+    if (preferredId === "none") return undefined;
+    if (preferredId) return conns.find((c) => c.id === preferredId && c.provider === provider);
+    const ofProvider = conns.filter((c) => c.provider === provider);
+    return ofProvider.length === 1 ? ofProvider[0] : undefined;
+  };
 
   const nmiRow = pick("nmi", settings?.nmi?.connection_id);
   const metaRow = pick("meta", settings?.meta?.connection_id);
