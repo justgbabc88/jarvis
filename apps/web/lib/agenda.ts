@@ -1,10 +1,12 @@
 import { supabaseAdmin } from "./supabase";
 import { decryptJson } from "./crypto";
 import { fetchClickUpTodayTasks, ClickUpCreds, ClickUpTask } from "./connectors/clickup";
-import { fetchCalendarToday, GCalCreds, CalendarEvent } from "./connectors/gcal";
+import { fetchCalendarUpcoming, GCalCreds, CalendarEvent, UpcomingEvent } from "./connectors/gcal";
+import { todayYmd } from "./time";
 
 export type TodayAgenda = {
   events: CalendarEvent[];
+  upcoming: UpcomingEvent[]; // next 7 days incl. today
   tasks: ClickUpTask[];
   connected: { calendar: boolean; clickup: boolean };
   errors: string[];
@@ -32,11 +34,13 @@ export async function getTodayAgenda(): Promise<TodayAgenda> {
   const rows = (data as any[]) || [];
   const agenda: TodayAgenda = {
     events: [],
+    upcoming: [],
     tasks: [],
     connected: { calendar: false, clickup: false },
     errors: [],
   };
 
+  const today = todayYmd();
   await Promise.all(
     rows.map(async (row) => {
       try {
@@ -44,7 +48,9 @@ export async function getTodayAgenda(): Promise<TodayAgenda> {
           const creds = decode<GCalCreds>(row.credentials);
           if (!creds?.ics_url) return;
           agenda.connected.calendar = true;
-          agenda.events.push(...(await fetchCalendarToday(creds)));
+          const upcoming = await fetchCalendarUpcoming(creds, 7);
+          agenda.upcoming.push(...upcoming);
+          agenda.events.push(...upcoming.filter((e) => e.date === today));
         } else if (row.provider === "clickup") {
           const creds = decode<ClickUpCreds>(row.credentials);
           if (!creds?.api_token) return;

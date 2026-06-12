@@ -83,6 +83,12 @@ export async function POST(req: NextRequest) {
     ...agenda.tasks.map((t) => `- task${t.overdue ? " (OVERDUE)" : ""}: ${t.name}`),
   ].join("\n");
 
+  const dayName = (d: string) =>
+    new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
+  const upcomingLines = agenda.upcoming
+    .map((e) => `- ${e.date} (${dayName(e.date)}) ${e.time}: ${e.summary}`)
+    .join("\n");
+
   const businessLines = cards
     .map(
       (c) =>
@@ -106,6 +112,9 @@ export async function POST(req: NextRequest) {
       (agenda.connected.calendar || agenda.connected.clickup
         ? "nothing scheduled or due today"
         : "no calendar or task tool connected")
+    }`,
+    `CALENDAR · NEXT 7 DAYS:\n${
+      upcomingLines || (agenda.connected.calendar ? "no events in the next 7 days" : "no calendar connected")
     }`,
   ].join("\n\n");
 

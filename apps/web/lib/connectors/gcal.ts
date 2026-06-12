@@ -17,6 +17,8 @@ export type CalendarEvent = {
   time: string; // "all day" or "HH:MM"
 };
 
+export type UpcomingEvent = CalendarEvent & { date: string }; // YYYY-MM-DD
+
 // ICS folds long lines; continuations start with a space or tab.
 function unfold(text: string): string[] {
   const out: string[] = [];
@@ -89,62 +91,88 @@ function rrule(value: string): Record<string, string> {
   return out;
 }
 
-export async function fetchCalendarToday(creds: GCalCreds): Promise<CalendarEvent[]> {
+function occursOn(ev: VEvent, dayYmd: string, tz: string): { time: string } | null {
+  if (ev.STATUS?.[0]?.value === "CANCELLED") return null;
+  const dtstart = ev.DTSTART?.[0];
+  if (!dtstart) return null;
+  const start = startParts(dtstart.value, tz);
+  if (start.ymd > dayYmd) return null;
+
+  const dayCompact = dayYmd.replace(/-/g, "");
+  const weekday = BYDAY[new Date(`${dayYmd}T12:00:00Z`).getUTCDay()];
+
+  let occurs = false;
+  const rule = ev.RRULE?.[0] ? rrule(ev.RRULE[0].value) : null;
+  if (!rule) {
+    occurs = start.ymd === dayYmd;
+  } else {
+    const until = rule.UNTIL ? rule.UNTIL.slice(0, 8) : null;
+    if (until && until < dayCompact) return null;
+    switch (rule.FREQ) {
+      case "DAILY":
+        occurs = true;
+        break;
+      case "WEEKLY": {
+        const days = rule.BYDAY
+          ? rule.BYDAY.split(",").map((d) => d.slice(-2))
+          : [BYDAY[new Date(`${start.ymd}T12:00:00Z`).getUTCDay()]];
+        occurs = days.includes(weekday);
+        break;
+      }
+      case "MONTHLY":
+        occurs = start.ymd.slice(8, 10) === dayYmd.slice(8, 10);
+        break;
+      case "YEARLY":
+        occurs = start.ymd.slice(5) === dayYmd.slice(5);
+        break;
+    }
+    const exdates = (ev.EXDATE || []).map((e) => e.value.slice(0, 8));
+    if (exdates.includes(dayCompact)) occurs = false;
+  }
+  return occurs ? { time: start.time } : null;
+}
+
+async function fetchAndParse(creds: GCalCreds): Promise<VEvent[]> {
   const res = await fetch(creds.ics_url, { redirect: "follow" });
   if (!res.ok) throw new Error(`Calendar: HTTP ${res.status} fetching the iCal URL`);
   const text = await res.text();
   if (!text.includes("BEGIN:VCALENDAR")) {
     throw new Error("Calendar: that URL didn't return an iCal feed — use the SECRET iCal address");
   }
+  return parseEvents(unfold(text));
+}
 
+function sortByTime(a: CalendarEvent, b: CalendarEvent): number {
+  return a.time === "all day" ? -1 : b.time === "all day" ? 1 : a.time.localeCompare(b.time);
+}
+
+/** Events for the next `days` days (including today), in the app timezone. */
+export async function fetchCalendarUpcoming(creds: GCalCreds, days = 7): Promise<UpcomingEvent[]> {
+  const tz = appTimezone();
+  const events = await fetchAndParse(creds);
+  const out: UpcomingEvent[] = [];
+  for (let i = 0; i < days; i++) {
+    const day = ymd(new Date(Date.now() + i * 86400000), tz);
+    const todays: UpcomingEvent[] = [];
+    for (const ev of events) {
+      const hit = occursOn(ev, day, tz);
+      if (hit) todays.push({ date: day, time: hit.time, summary: ev.SUMMARY?.[0]?.value || "(no title)" });
+    }
+    todays.sort(sortByTime);
+    out.push(...todays);
+  }
+  return out;
+}
+
+export async function fetchCalendarToday(creds: GCalCreds): Promise<CalendarEvent[]> {
   const tz = appTimezone();
   const today = ymd(new Date(), tz);
-  const todayCompact = today.replace(/-/g, "");
-  const weekday = BYDAY[new Date(`${today}T12:00:00Z`).getUTCDay()];
-
+  const events = await fetchAndParse(creds);
   const out: CalendarEvent[] = [];
-  for (const ev of parseEvents(unfold(text))) {
-    if (ev.STATUS?.[0]?.value === "CANCELLED") continue;
-    const dtstart = ev.DTSTART?.[0];
-    if (!dtstart) continue;
-    const start = startParts(dtstart.value, tz);
-    if (start.ymd > today) continue;
-
-    let occursToday = false;
-    const rule = ev.RRULE?.[0] ? rrule(ev.RRULE[0].value) : null;
-    if (!rule) {
-      occursToday = start.ymd === today;
-    } else {
-      const until = rule.UNTIL ? rule.UNTIL.slice(0, 8) : null;
-      if (until && until < todayCompact) continue;
-      switch (rule.FREQ) {
-        case "DAILY":
-          occursToday = true;
-          break;
-        case "WEEKLY": {
-          const days = rule.BYDAY
-            ? rule.BYDAY.split(",").map((d) => d.slice(-2))
-            : [BYDAY[new Date(`${start.ymd}T12:00:00Z`).getUTCDay()]];
-          occursToday = days.includes(weekday);
-          break;
-        }
-        case "MONTHLY":
-          occursToday = start.ymd.slice(8, 10) === today.slice(8, 10);
-          break;
-        case "YEARLY":
-          occursToday = start.ymd.slice(5) === today.slice(5);
-          break;
-      }
-      const exdates = (ev.EXDATE || []).map((e) => e.value.slice(0, 8));
-      if (exdates.includes(todayCompact)) occursToday = false;
-    }
-    if (!occursToday) continue;
-
-    out.push({ summary: ev.SUMMARY?.[0]?.value || "(no title)", time: start.time });
+  for (const ev of events) {
+    const hit = occursOn(ev, today, tz);
+    if (hit) out.push({ summary: ev.SUMMARY?.[0]?.value || "(no title)", time: hit.time });
   }
-
-  out.sort((a, b) =>
-    a.time === "all day" ? -1 : b.time === "all day" ? 1 : a.time.localeCompare(b.time)
-  );
+  out.sort(sortByTime);
   return out;
 }
