@@ -8,6 +8,7 @@ import {
   DailyMetric,
 } from "@/lib/data";
 import { money } from "@/lib/format";
+import { getTodayAgenda } from "@/lib/agenda";
 
 // Monday of the week a date falls in, as YYYY-MM-DD.
 function weekStart(ymd: string): string {
@@ -69,12 +70,18 @@ export async function POST(req: NextRequest) {
   }
 
   // Assemble a compact, current picture for Jarvis to speak from.
-  const [cards, activity, goals, daily] = await Promise.all([
+  const [cards, activity, goals, daily, agenda] = await Promise.all([
     getBusinessCards(),
     getYesterdayActivity(),
     getActiveGoals(),
     getDailyMetrics(60),
+    getTodayAgenda(),
   ]);
+
+  const agendaLines = [
+    ...agenda.events.map((e) => `- ${e.time}: ${e.summary}`),
+    ...agenda.tasks.map((t) => `- task${t.overdue ? " (OVERDUE)" : ""}: ${t.name}`),
+  ].join("\n");
 
   const businessLines = cards
     .map(
@@ -94,6 +101,12 @@ export async function POST(req: NextRequest) {
       activity.map((a) => `- ${a.summary}`).join("\n") || "nothing logged"
     }`,
     `ACTIVE GOALS:\n${goals.map((g: any) => `- ${g.title}`).join("\n") || "none set"}`,
+    `TODAY'S CALENDAR & TASKS:\n${
+      agendaLines ||
+      (agenda.connected.calendar || agenda.connected.clickup
+        ? "nothing scheduled or due today"
+        : "no calendar or task tool connected")
+    }`,
   ].join("\n\n");
 
   const system = [

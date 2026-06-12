@@ -23,6 +23,22 @@ const PROVIDERS: Record<string, { label: string; fields: { key: string; label: s
       { key: "ad_account_id", label: "Ad account id", placeholder: "act_1234567890" },
     ],
   },
+  clickup: {
+    label: "ClickUp — tasks",
+    fields: [
+      { key: "api_token", label: "Personal API token", placeholder: "pk_… (ClickUp → Settings → Apps → API Token)" },
+    ],
+  },
+  google_calendar: {
+    label: "Google Calendar",
+    fields: [
+      {
+        key: "ics_url",
+        label: "Secret iCal URL",
+        placeholder: "https://calendar.google.com/calendar/ical/…/basic.ics",
+      },
+    ],
+  },
 };
 
 export default function ConnectionsPage() {
@@ -92,7 +108,7 @@ export default function ConnectionsPage() {
       </div>
 
       <form onSubmit={save} className="card space-y-3">
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {Object.entries(PROVIDERS).map(([key, p]) => (
             <button
               type="button"

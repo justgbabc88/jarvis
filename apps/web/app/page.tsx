@@ -6,6 +6,7 @@ import {
   getPendingApprovals,
   getActiveGoals,
 } from "@/lib/data";
+import { getTodayAgenda } from "@/lib/agenda";
 import { relativeDay } from "@/lib/format";
 import VoiceBriefing from "@/components/VoiceBriefing";
 import BusinessCardView from "@/components/BusinessCardView";
@@ -28,11 +29,12 @@ export default async function Dashboard() {
     );
   }
 
-  const [cards, activity, approvals, goals] = await Promise.all([
+  const [cards, activity, approvals, goals, agenda] = await Promise.all([
     getBusinessCards(),
     getYesterdayActivity(),
     getPendingApprovals(),
     getActiveGoals(),
+    getTodayAgenda(),
   ]);
 
   return (
@@ -108,12 +110,60 @@ export default async function Dashboard() {
         {/* Tasks & calendar (today) */}
         <div className="card">
           <div className="card-title mb-3">Today · tasks &amp; calendar</div>
-          <p className="text-sm text-muted">
-            Connect a calendar and task tool to see what’s on your plate today.
-          </p>
-          <Link href="/connections" className="btn mt-3">
-            Connect calendar / tasks
-          </Link>
+          {!agenda.connected.calendar && !agenda.connected.clickup ? (
+            <>
+              <p className="text-sm text-muted">
+                Connect a calendar and task tool to see what’s on your plate today.
+              </p>
+              <Link href="/connections" className="btn mt-3">
+                Connect calendar / tasks
+              </Link>
+            </>
+          ) : (
+            <div className="space-y-4">
+              {agenda.connected.calendar && (
+                <div>
+                  <div className="text-xs font-medium uppercase text-muted">Calendar</div>
+                  {agenda.events.length === 0 ? (
+                    <p className="mt-1 text-sm text-muted">Nothing on the calendar today.</p>
+                  ) : (
+                    <ul className="mt-1 space-y-1">
+                      {agenda.events.slice(0, 8).map((e, i) => (
+                        <li key={i} className="flex items-baseline gap-2 text-sm">
+                          <span className="w-14 shrink-0 text-xs text-accent2">{e.time}</span>
+                          <span>{e.summary}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+              {agenda.connected.clickup && (
+                <div>
+                  <div className="text-xs font-medium uppercase text-muted">Tasks due</div>
+                  {agenda.tasks.length === 0 ? (
+                    <p className="mt-1 text-sm text-muted">Nothing due today. Clear plate.</p>
+                  ) : (
+                    <ul className="mt-1 space-y-1">
+                      {agenda.tasks.slice(0, 8).map((t) => (
+                        <li key={t.id} className="flex items-baseline gap-2 text-sm">
+                          <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-accent2" />
+                          <a href={t.url} target="_blank" rel="noreferrer" className="hover:underline">
+                            {t.name}
+                          </a>
+                          {t.overdue && <span className="pill text-bad">overdue</span>}
+                          {t.listName && <span className="text-xs text-muted">{t.listName}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+              {agenda.errors.length > 0 && (
+                <p className="text-xs text-bad">{agenda.errors.join(" · ")}</p>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
