@@ -33,9 +33,12 @@ function splitTransactions(xml: string): string[] {
 }
 
 function dayOf(isoish: string): string {
-  // NMI returns date strings like "2026-06-10 14:03:55"; take the date part.
+  // NMI date strings are either "2026-06-10 14:03:55" or compact "20260610140355".
   const m = isoish.match(/(\d{4})-(\d{2})-(\d{2})/);
-  return m ? `${m[1]}-${m[2]}-${m[3]}` : isoish.slice(0, 10);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  const c = isoish.match(/^(\d{4})(\d{2})(\d{2})/);
+  if (c) return `${c[1]}-${c[2]}-${c[3]}`;
+  return isoish.slice(0, 10);
 }
 
 export type NmiCreds = { security_key: string };
