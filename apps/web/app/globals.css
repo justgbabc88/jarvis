@@ -6,32 +6,104 @@
   color-scheme: dark;
 }
 
-html, body {
-  background: radial-gradient(1200px 600px at 70% -10%, rgba(124, 92, 255, 0.12), transparent 60%),
-    radial-gradient(900px 500px at 0% 0%, rgba(54, 224, 200, 0.08), transparent 55%), #0a0b10;
-  color: #e7e9f3;
+html,
+body {
+  background-color: #04080f;
+  color: #d6f3ff;
+}
+
+/* HUD backdrop: reactor glows + tech grid, fixed behind all content */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(1100px 600px at 78% -12%, rgba(45, 212, 255, 0.12), transparent 60%),
+    radial-gradient(900px 520px at -5% 0%, rgba(45, 212, 255, 0.06), transparent 55%),
+    linear-gradient(rgba(45, 212, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(45, 212, 255, 0.05) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 42px 42px, 42px 42px;
+}
+
+/* Slow scan-line sweeping down the viewport */
+body::after {
+  content: "";
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(45, 212, 255, 0.5), transparent);
+  box-shadow: 0 0 18px 2px rgba(45, 212, 255, 0.3);
+  animation: scan 9s linear infinite;
 }
 
 @layer components {
   .card {
-    @apply rounded-2xl border border-line bg-panel/80 backdrop-blur p-5;
+    @apply relative rounded-xl border border-line bg-panel/70 p-5 backdrop-blur;
+  }
+  /* Diagonal HUD corner brackets */
+  .card::before,
+  .card::after {
+    content: "";
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    pointer-events: none;
+    border-color: rgba(45, 212, 255, 0.55);
+    border-style: solid;
+  }
+  .card::before {
+    top: 7px;
+    left: 7px;
+    border-width: 1px 0 0 1px;
+  }
+  .card::after {
+    bottom: 7px;
+    right: 7px;
+    border-width: 0 1px 1px 0;
   }
   .card-title {
-    @apply text-sm font-medium text-muted tracking-wide uppercase;
+    @apply font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-accent/80;
   }
   .stat {
-    @apply text-3xl font-semibold tabular-nums;
+    @apply font-display text-3xl font-semibold tabular-nums text-white;
   }
   .btn {
-    @apply inline-flex items-center gap-2 rounded-xl border border-line bg-panel2 px-3.5 py-2 text-sm font-medium hover:border-accent/60 hover:shadow-glow transition;
+    @apply inline-flex items-center gap-2 rounded-lg border border-line bg-panel2/80 px-3.5 py-2 text-sm font-medium text-white/90 transition hover:border-accent/70 hover:text-white hover:shadow-glow-sm;
   }
   .btn-primary {
     @apply border-accent/50 bg-accent/15 text-white hover:bg-accent/25;
   }
   .pill {
-    @apply inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-1 text-xs text-muted;
+    @apply inline-flex items-center gap-1 rounded-md border border-line px-2.5 py-1 font-mono text-[11px] uppercase tracking-wider text-muted;
   }
   .input {
-    @apply w-full rounded-xl border border-line bg-ink/60 px-3 py-2 text-sm outline-none focus:border-accent/60;
+    @apply w-full rounded-lg border border-line bg-ink/70 px-3 py-2 text-sm outline-none transition focus:border-accent/70 focus:shadow-glow-sm;
+  }
+
+  /* Arc-reactor logo badge */
+  .reactor {
+    @apply relative grid h-10 w-10 place-items-center rounded-full;
+    border: 1px solid rgba(45, 212, 255, 0.6);
+    background: radial-gradient(circle at center, rgba(45, 212, 255, 0.35), rgba(45, 212, 255, 0.05) 60%, transparent 72%);
+    box-shadow: 0 0 16px rgba(45, 212, 255, 0.5), inset 0 0 10px rgba(45, 212, 255, 0.4);
+  }
+  .reactor::before {
+    content: "";
+    position: absolute;
+    inset: -5px;
+    border-radius: 9999px;
+    border: 1px solid rgba(45, 212, 255, 0.35);
+    animation: reactor-pulse 2.4s ease-in-out infinite;
+  }
+  .reactor-core {
+    @apply font-display text-base font-bold;
+    color: #d6f3ff;
+    text-shadow: 0 0 8px rgba(45, 212, 255, 0.85);
   }
 }
