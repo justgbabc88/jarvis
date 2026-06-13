@@ -35,6 +35,8 @@ function BusinessConnections({
   const [nmiId, setNmiId] = useState<string>(b.settings?.nmi?.connection_id || "");
   const [metaId, setMetaId] = useState<string>(b.settings?.meta?.connection_id || "");
   const [adAccount, setAdAccount] = useState<string>(b.settings?.meta?.ad_account_id || "");
+  const [nmiFilterMode, setNmiFilterMode] = useState<string>(b.settings?.nmi?.filter?.mode || "none");
+  const [nmiFilterMatch, setNmiFilterMatch] = useState<string>(b.settings?.nmi?.filter?.match || "");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -48,6 +50,11 @@ function BusinessConnections({
     settings.meta = { ...(settings.meta || {}) };
     if (nmiId) settings.nmi.connection_id = nmiId;
     else delete settings.nmi.connection_id;
+    if (nmiFilterMode === "include" || nmiFilterMode === "exclude") {
+      settings.nmi.filter = { mode: nmiFilterMode, match: nmiFilterMatch.trim() };
+    } else {
+      delete settings.nmi.filter;
+    }
     if (metaId) settings.meta.connection_id = metaId;
     else delete settings.meta.connection_id;
     if (adAccount.trim()) settings.meta.ad_account_id = adAccount.trim();
@@ -67,41 +74,68 @@ function BusinessConnections({
   }
 
   return (
-    <div className="mt-3 grid gap-3 border-t border-line pt-3 sm:grid-cols-3">
-      <div>
-        <label className="mb-1 block text-xs text-muted">NMI (revenue)</label>
-        <select className="input" value={nmiId} onChange={(e) => setNmiId(e.target.value)}>
-          <option value="">Auto (if only one)</option>
-          <option value="none">None</option>
-          {nmiOptions.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.label}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label className="mb-1 block text-xs text-muted">Meta (ad spend)</label>
-        <select className="input" value={metaId} onChange={(e) => setMetaId(e.target.value)}>
-          <option value="">Auto (if only one)</option>
-          <option value="none">None</option>
-          {metaOptions.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.label}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label className="mb-1 block text-xs text-muted">Meta ad account id(s) — comma-separated to combine</label>
-        <div className="flex gap-2">
+    <div className="mt-3 space-y-3 border-t border-line pt-3">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div>
+          <label className="mb-1 block text-xs text-muted">NMI (revenue)</label>
+          <select className="input" value={nmiId} onChange={(e) => setNmiId(e.target.value)}>
+            <option value="">Auto (if only one)</option>
+            <option value="none">None</option>
+            {nmiOptions.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs text-muted">Meta (ad spend)</label>
+          <select className="input" value={metaId} onChange={(e) => setMetaId(e.target.value)}>
+            <option value="">Auto (if only one)</option>
+            <option value="none">None</option>
+            {metaOptions.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs text-muted">Meta ad account id(s) — comma-separated to combine</label>
           <input
             className="input"
             value={adAccount}
             onChange={(e) => setAdAccount(e.target.value)}
             placeholder="act_123, act_456"
           />
-          <button className="btn btn-primary shrink-0" onClick={save} disabled={saving}>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-3 sm:items-end">
+        <div>
+          <label className="mb-1 block text-xs text-muted">NMI payer filter (split a shared gateway)</label>
+          <select
+            className="input"
+            value={nmiFilterMode}
+            onChange={(e) => setNmiFilterMode(e.target.value)}
+          >
+            <option value="none">No filter (all transactions)</option>
+            <option value="include">Only include payers matching…</option>
+            <option value="exclude">Exclude payers matching…</option>
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs text-muted">Payer / company contains</label>
+          <input
+            className="input"
+            value={nmiFilterMatch}
+            onChange={(e) => setNmiFilterMatch(e.target.value)}
+            placeholder="e.g. Londen Leads"
+            disabled={nmiFilterMode === "none"}
+          />
+        </div>
+        <div className="flex sm:justify-end">
+          <button className="btn btn-primary" onClick={save} disabled={saving}>
             {saving ? "…" : saved ? "Saved ✓" : "Save"}
           </button>
         </div>

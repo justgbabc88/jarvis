@@ -43,6 +43,15 @@ function dayOf(isoish: string): string {
 
 export type NmiCreds = { security_key: string };
 
+/**
+ * Split one gateway across businesses by matching the payer. `match` is a
+ * case-insensitive substring tested against each transaction's company /
+ * name / email / order description.
+ *   include → keep ONLY transactions that match (empty match keeps nothing)
+ *   exclude → drop transactions that match (empty match keeps everything)
+ */
+export type NmiFilter = { mode: "include" | "exclude"; match: string };
+
 export function nmiCredsFromEnv(): NmiCreds | null {
   const k = process.env.NMI_SECURITY_KEY;
   return k ? { security_key: k } : null;
@@ -50,7 +59,8 @@ export function nmiCredsFromEnv(): NmiCreds | null {
 
 export async function fetchNmiRevenue(
   creds: NmiCreds,
-  range: DateRange
+  range: DateRange,
+  filter?: NmiFilter | null
 ): Promise<RevenueResult> {
   const params = new URLSearchParams({
     security_key: creds.security_key,
@@ -72,6 +82,8 @@ export async function fetchNmiRevenue(
     throw new Error(`NMI error: ${tagValues(xml, "error_response")[0] || "authentication failed"}`);
   }
 
+  const needle = filter?.match.trim().toLowerCase() || "";
+
   const byDayMap = new Map<string, number>();
   let totalCents = 0;
 
@@ -80,6 +92,26 @@ export async function fetchNmiRevenue(
     const condition = (tagValues(tx, "condition")[0] || "").toLowerCase();
     const amountStr = tagValues(tx, "amount")[0] || tagValues(tx, "settle_amount")[0] || "0";
     const dateStr = tagValues(tx, "transaction_date")[0] || tagValues(tx, "date")[0] || range.since;
+
+    // Per-business payer filter (split a shared gateway between businesses).
+    if (filter) {
+      const hay = [
+        tagValues(tx, "company")[0],
+        tagValues(tx, "first_name")[0],
+        tagValues(tx, "last_name")[0],
+        tagValues(tx, "email")[0],
+        tagValues(tx, "order_description")[0],
+        tagValues(tx, "shipping_company")[0],
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      if (filter.mode === "include") {
+        if (!needle || !hay.includes(needle)) continue; // include nothing until a match is set
+      } else if (needle && hay.includes(needle)) {
+        continue; // exclude matches
+      }
+    }
 
     // Skip abandoned/declined; count settled or pending-settlement money.
     const counts = ["complete", "settled", "pendingsettlement", "pending_settlement"].includes(condition);

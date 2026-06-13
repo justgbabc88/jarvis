@@ -1,7 +1,7 @@
 import { supabaseAdmin } from "../supabase";
 import { decryptJson } from "../crypto";
 import { DateRange } from "./types";
-import { fetchNmiRevenue, nmiCredsFromEnv, NmiCreds } from "./nmi";
+import { fetchNmiRevenue, nmiCredsFromEnv, NmiCreds, NmiFilter } from "./nmi";
 import { fetchMetaSpend, metaCredsFromEnv, MetaCreds } from "./meta";
 
 export * from "./types";
@@ -33,6 +33,7 @@ function decodeCreds<T>(row: ConnectionRow | undefined): T | null {
  */
 async function resolveCreds(businessId: string): Promise<{
   nmi: NmiCreds | null;
+  nmiFilter: NmiFilter | null;
   meta: MetaCreds | null;
 }> {
   const db = supabaseAdmin();
@@ -64,7 +65,15 @@ async function resolveCreds(businessId: string): Promise<{
   if (meta && settings?.meta?.ad_account_id) {
     meta = { ...meta, ad_account_id: String(settings.meta.ad_account_id) };
   }
-  return { nmi, meta };
+
+  // Optional payer filter so one NMI gateway can feed multiple businesses.
+  const f = settings?.nmi?.filter;
+  const nmiFilter: NmiFilter | null =
+    f && (f.mode === "include" || f.mode === "exclude")
+      ? { mode: f.mode, match: String(f.match || "") }
+      : null;
+
+  return { nmi, nmiFilter, meta };
 }
 
 export type BusinessMetrics = {
@@ -83,7 +92,7 @@ export async function getBusinessMetrics(
   businessId: string,
   range: DateRange
 ): Promise<BusinessMetrics> {
-  const { nmi, meta } = await resolveCreds(businessId);
+  const { nmi, nmiFilter, meta } = await resolveCreds(businessId);
   const errors: string[] = [];
   let revenueCents = 0;
   let adSpendCents = 0;
@@ -92,7 +101,7 @@ export async function getBusinessMetrics(
 
   if (nmi) {
     try {
-      const r = await fetchNmiRevenue(nmi, range);
+      const r = await fetchNmiRevenue(nmi, range, nmiFilter);
       revenueCents = r.totalCents;
       revenueByDay = r.byDay;
     } catch (e: any) {
