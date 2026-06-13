@@ -58,11 +58,18 @@ export default async function Dashboard() {
         </Link>
       )}
 
-      <div className="flex justify-end">
+      {/* Businesses */}
+      <div className="flex items-center gap-3">
+        <span className="font-mono text-[11px] uppercase tracking-[0.25em] text-accent/70">
+          // business units
+        </span>
+        <span className="holo-rule" />
+        <span className="font-mono text-[11px] uppercase tracking-wider text-muted">
+          {cards.length} online
+        </span>
         <SyncButton />
       </div>
 
-      {/* Businesses */}
       {cards.length === 0 ? (
         <div className="card">
           <h2 className="font-semibold">No businesses yet</h2>
@@ -81,6 +88,13 @@ export default async function Dashboard() {
           ))}
         </div>
       )}
+
+      <div className="flex items-center gap-3">
+        <span className="font-mono text-[11px] uppercase tracking-[0.25em] text-accent/70">
+          // systems
+        </span>
+        <span className="holo-rule" />
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         {/* What Jarvis did yesterday */}

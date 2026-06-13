@@ -89,51 +89,73 @@ export default function VoiceBriefing() {
     }
   }
 
+  const orbState = listening ? "is-listening" : thinking ? "is-thinking" : speaking ? "is-speaking" : "";
+
   return (
-    <div className="card bg-gradient-to-br from-panel to-panel2">
-      <div className="flex items-center justify-between">
-        <div className="card-title">Ask Jarvis</div>
-        <div className="pill">{speaking ? "speaking…" : thinking ? "thinking…" : "voice · free"}</div>
+    <div className="card">
+      <div className="flex items-start gap-4">
+        <div className={`orb ${orbState}`} aria-hidden />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between">
+            <div className="card-title">Ask Jarvis</div>
+            <div className="pill">
+              {speaking ? (
+                <>
+                  <span className="eq">
+                    <i /><i /><i /><i /><i />
+                  </span>
+                  speaking
+                </>
+              ) : thinking ? (
+                "analyzing…"
+              ) : listening ? (
+                "listening…"
+              ) : (
+                "online · voice free"
+              )}
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => ask("Give me my morning briefing across all my businesses.")}
+              className="btn btn-primary"
+              disabled={thinking}
+            >
+              ▶︎ Daily briefing
+            </button>
+
+            {supportsSTT && (
+              <button
+                onClick={startListening}
+                className={`btn ${listening ? "border-accent2/60 text-accent2" : ""}`}
+                disabled={thinking}
+              >
+                {listening ? "● listening…" : "🎤 Ask out loud"}
+              </button>
+            )}
+
+            <form
+              className="flex flex-1 items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const input = e.currentTarget.elements.namedItem("q") as HTMLInputElement;
+                if (input.value.trim()) ask(input.value.trim());
+              }}
+            >
+              <input name="q" className="input" placeholder="…or type: How's Lenne doing this month?" />
+            </form>
+          </div>
+
+          {transcript && <p className="mt-3 font-mono text-sm text-muted">&gt; {transcript}</p>}
+          {answer && <p className="mt-2 text-[15px] leading-relaxed text-white/90">{answer}</p>}
+          {!supportsSTT && (
+            <p className="mt-3 text-xs text-muted">
+              Voice input isn’t supported in this browser — typing still works, and answers are read aloud.
+            </p>
+          )}
+        </div>
       </div>
-
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          onClick={() => ask("Give me my morning briefing across all my businesses.")}
-          className="btn btn-primary"
-          disabled={thinking}
-        >
-          ▶︎ Daily briefing
-        </button>
-
-        {supportsSTT && (
-          <button
-            onClick={startListening}
-            className={`btn ${listening ? "border-accent2/60 text-accent2" : ""}`}
-            disabled={thinking}
-          >
-            {listening ? "● listening…" : "🎤 Ask out loud"}
-          </button>
-        )}
-
-        <form
-          className="flex flex-1 items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const input = (e.currentTarget.elements.namedItem("q") as HTMLInputElement);
-            if (input.value.trim()) ask(input.value.trim());
-          }}
-        >
-          <input name="q" className="input" placeholder="…or type: How's Lenne doing this month?" />
-        </form>
-      </div>
-
-      {transcript && <p className="mt-3 text-sm text-muted">You: “{transcript}”</p>}
-      {answer && <p className="mt-2 text-[15px] leading-relaxed text-white/90">{answer}</p>}
-      {!supportsSTT && (
-        <p className="mt-3 text-xs text-muted">
-          Voice input isn’t supported in this browser — typing still works, and answers are read aloud.
-        </p>
-      )}
     </div>
   );
 }
