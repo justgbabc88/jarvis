@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "./supabase";
 import { getProviderCreds } from "./connectors";
 import { sendEmail, EmailCreds } from "./connectors/email";
+import { postSlack, SlackCreds } from "./connectors/slack";
 import { metaCredsFromEnv, MetaCreds } from "./connectors/meta";
 
 /**
@@ -12,6 +13,7 @@ import { metaCredsFromEnv, MetaCreds } from "./connectors/meta";
  *
  * Supported payloads (payload.action):
  *   email.send          { to, subject, body, cc?, bcc? }
+ *   slack.post          { text }
  *   meta.budget_update  { object_id, object_type: 'adset'|'campaign',
  *                         daily_budget_cents }
  *
@@ -48,6 +50,20 @@ async function execEmailSend(payload: any): Promise<ExecutionResult> {
     message: `Email sent to ${payload.to}.`,
     detail: { message_id: res.messageId, accepted: res.accepted },
   };
+}
+
+async function execSlackPost(payload: any): Promise<ExecutionResult> {
+  const creds = await getProviderCreds<SlackCreds>("slack");
+  if (!creds) {
+    return {
+      status: "failed",
+      message: "No Slack connection. Add one in Connections (incoming webhook URL), then re-approve.",
+    };
+  }
+  const text = String(payload.text || "").trim();
+  if (!text) return { status: "failed", message: "Payload needs `text` to post." };
+  await postSlack(creds, text);
+  return { status: "executed", message: "Posted to Slack." };
 }
 
 async function execMetaBudgetUpdate(payload: any): Promise<ExecutionResult> {
@@ -103,6 +119,7 @@ export async function executeApproval(approval: {
 
   try {
     if (action === "email.send") result = await execEmailSend(approval.payload);
+    else if (action === "slack.post") result = await execSlackPost(approval.payload);
     else if (action === "meta.budget_update") result = await execMetaBudgetUpdate(approval.payload);
     else {
       result = {
@@ -125,6 +142,19 @@ export async function executeApproval(approval: {
       execution_result: { message: result.message, ...(result.detail || {}) },
     })
     .eq("id", approval.id);
+
+  // Tell the owner in Slack what actually happened (skip slack.post — the
+  // posted message itself is already visible in the channel).
+  if (action !== "slack.post") {
+    const { notifySlack } = await import("./notify");
+    await notifySlack(
+      result.status === "executed"
+        ? `✅ Executed “${approval.title}” — ${result.message}`
+        : result.status === "failed"
+          ? `❌ “${approval.title}” failed to execute: ${result.message}`
+          : `☑️ Approved “${approval.title}” (${result.message})`
+    );
+  }
 
   await db.from("activity_log").insert({
     type: "action",

@@ -1,75 +1,110 @@
 import { ymd, appTimezone } from "../time";
 
 /**
- * ClickUp tasks via a personal API token (ClickUp → Settings → Apps).
- * Read-only: powers the dashboard "today" panel and the briefing with
- * tasks that are due today or overdue.
+ * ClickUp tasks via the v2 API, authenticated with a personal API token
+ * (ClickUp → avatar → Settings → Apps → API Token, starts with "pk_").
+ *
+ * "Today" = open tasks assigned to the token's user that are due today
+ * or overdue. Tasks without due dates are excluded on purpose — this
+ * feeds the "what's on my plate today" card, not a full task browser.
  */
 
 const API = "https://api.clickup.com/api/v2";
 
-export type ClickUpCreds = { api_token: string };
+export type ClickUpCreds = { api_token: string; list_id?: string; list_name?: string };
 
-export type TaskItem = {
-  title: string;
-  due: string | null;       // YYYY-MM-DD in app tz
+export type ClickUpList = { id: string; name: string };
+
+export type ClickUpTask = {
+  id: string;
+  name: string;
+  status: string;
+  listName: string;
+  dueMs: number | null;
   overdue: boolean;
-  status?: string;
-  list?: string;
-  url?: string;
+  url: string;
 };
 
-async function cu(path: string, creds: ClickUpCreds): Promise<any> {
-  const res = await fetch(`${API}${path}`, {
-    headers: { Authorization: creds.api_token },
-  });
+async function cu(path: string, token: string): Promise<any> {
+  const res = await fetch(`${API}${path}`, { headers: { Authorization: token } });
   const json: any = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(`ClickUp API error (${res.status}): ${json.err || "check the API token"}`);
+  if (!res.ok || json.err) {
+    throw new Error(`ClickUp: ${json.err || `HTTP ${res.status}`}`);
   }
   return json;
 }
 
-/** Live credential check used by the Connections "Test" button. */
-export async function verifyClickUp(creds: ClickUpCreds): Promise<string> {
-  if (!creds?.api_token) throw new Error("an API token is required");
-  const me = await cu("/user", creds);
-  return me?.user?.username || me?.user?.email || "ok";
+export async function clickupWhoAmI(creds: ClickUpCreds): Promise<{ id: number; username: string }> {
+  const j = await cu("/user", creds.api_token);
+  return j.user;
 }
 
-/** Tasks due today or overdue (open tasks only), across all teams. */
-export async function fetchDueTasks(creds: ClickUpCreds): Promise<TaskItem[]> {
-  const today = ymd(new Date());
-  const teams = (await cu("/team", creds))?.teams || [];
-
-  // End of today in the app timezone, as a UTC ms timestamp.
-  // Take midnight tomorrow (app tz ≈ UTC offset within ±14h, so add a
-  // generous bound by formatting round-trip): simplest reliable approach —
-  // tomorrow's date at 00:00 UTC plus 14h covers every timezone; ClickUp
-  // due dates are usually date-level anyway, so we filter precisely below.
-  const endOfTodayUtcMs = Date.parse(`${today}T23:59:59Z`) + 14 * 3600 * 1000;
-
-  const out: TaskItem[] = [];
-  for (const team of teams.slice(0, 5)) {
-    const data = await cu(
-      `/team/${team.id}/task?due_date_lt=${endOfTodayUtcMs}&subtasks=true&include_closed=false`,
-      creds
-    );
-    for (const t of data?.tasks || []) {
-      if (!t.due_date) continue;
-      const dueYmd = ymd(new Date(Number(t.due_date)), appTimezone());
-      if (dueYmd > today) continue; // the ms bound above is intentionally loose
-      out.push({
-        title: t.name,
-        due: dueYmd,
-        overdue: dueYmd < today,
-        status: t.status?.status,
-        list: t.list?.name,
-        url: t.url,
-      });
+/** Every list across all teams/spaces, labeled "Space / Folder / List". */
+export async function fetchClickUpLists(creds: ClickUpCreds): Promise<ClickUpList[]> {
+  const token = creds.api_token;
+  const out: ClickUpList[] = [];
+  const teams = (await cu("/team", token)).teams || [];
+  for (const team of teams) {
+    const spaces = (await cu(`/team/${team.id}/space?archived=false`, token)).spaces || [];
+    for (const space of spaces) {
+      const [folders, folderless] = await Promise.all([
+        cu(`/space/${space.id}/folder?archived=false`, token),
+        cu(`/space/${space.id}/list?archived=false`, token),
+      ]);
+      for (const list of folderless.lists || []) {
+        out.push({ id: String(list.id), name: `${space.name} / ${list.name}` });
+      }
+      for (const folder of folders.folders || []) {
+        for (const list of folder.lists || []) {
+          out.push({ id: String(list.id), name: `${space.name} / ${folder.name} / ${list.name}` });
+        }
+      }
     }
   }
+  return out;
+}
 
-  out.sort((a, b) => (a.due || "").localeCompare(b.due || ""));
-  return out.slice(0, 50);
+export async function fetchClickUpTodayTasks(creds: ClickUpCreds): Promise<ClickUpTask[]> {
+  // End of today in the app timezone, as epoch ms.
+  const endOfToday = new Date(`${ymd(new Date(), appTimezone())}T23:59:59`);
+  const endMs = endOfToday.getTime();
+  const startOfTodayMs = endMs - 86399000;
+
+  const pushTasks = (tasks: ClickUpTask[], rows: any[]) => {
+    for (const task of rows) {
+      const dueMs = task.due_date ? Number(task.due_date) : null;
+      tasks.push({
+        id: task.id,
+        name: task.name,
+        status: task.status?.status || "open",
+        listName: task.list?.name || "",
+        dueMs,
+        overdue: dueMs !== null && dueMs < startOfTodayMs,
+        url: task.url,
+      });
+    }
+  };
+
+  const tasks: ClickUpTask[] = [];
+  if (creds.list_id) {
+    // Scoped to one list: every open task due today or overdue, any assignee.
+    const j = await cu(
+      `/list/${creds.list_id}/task?due_date_lt=${endMs + 1}&include_closed=false&order_by=due_date`,
+      creds.api_token
+    );
+    pushTasks(tasks, j.tasks || []);
+  } else {
+    // All lists: open tasks assigned to the token's user.
+    const me = await clickupWhoAmI(creds);
+    const teams = (await cu("/team", creds.api_token)).teams || [];
+    for (const t of teams) {
+      const j = await cu(
+        `/team/${t.id}/task?due_date_lt=${endMs + 1}&include_closed=false&assignees[]=${me.id}&order_by=due_date`,
+        creds.api_token
+      );
+      pushTasks(tasks, j.tasks || []);
+    }
+  }
+  tasks.sort((a, b) => (a.dueMs || 0) - (b.dueMs || 0));
+  return tasks;
 }

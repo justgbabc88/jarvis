@@ -19,33 +19,50 @@ const nav = [
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap"
+          rel="stylesheet"
+        />
+      </head>
       <body className="min-h-screen font-sans antialiased">
         <div className="mx-auto max-w-6xl px-5 py-6">
-          <header className="mb-8 flex items-center justify-between">
+          <header className="mb-8 flex items-center justify-between border-b border-line/70 pb-4">
             <Link href="/" className="flex items-center gap-3">
-              <span className="grid h-9 w-9 place-items-center rounded-xl border border-accent/40 bg-accent/15 text-accent shadow-glow">
-                <span className="text-lg font-bold">J</span>
+              <span className="reactor">
+                <span className="reactor-core">J</span>
               </span>
               <div>
-                <div className="text-lg font-semibold leading-none">Jarvis</div>
-                <div className="text-xs text-muted">your businesses, at a glance</div>
+                <div className="font-display text-lg font-bold tracking-[0.28em] text-white">
+                  JARVIS
+                </div>
+                <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-accent/70">
+                  just a rather very intelligent system
+                </div>
               </div>
             </Link>
-            <nav className="hidden gap-1 sm:flex">
+            <nav className="hidden items-center gap-1 sm:flex">
               {nav.map((n) => (
                 <Link
                   key={n.href}
                   href={n.href}
-                  className="rounded-lg px-3 py-1.5 text-sm text-muted hover:bg-panel2 hover:text-white"
+                  className="rounded-md px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-muted transition hover:bg-accent/10 hover:text-accent"
                 >
                   {n.label}
                 </Link>
               ))}
+              <span className="ml-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-good">
+                <span className="h-1.5 w-1.5 rounded-full bg-good shadow-[0_0_8px_2px_rgba(52,229,176,0.7)] animate-flicker" />
+                online
+              </span>
             </nav>
           </header>
           {children}
-          <footer className="mt-16 border-t border-line pt-5 text-xs text-muted">
-            Jarvis · built on Vercel + Railway + Supabase + Claude · voice is free (your browser)
+          <footer className="mt-16 flex flex-wrap items-center gap-x-2 border-t border-line/70 pt-5 font-mono text-[11px] uppercase tracking-wider text-muted">
+            <span className="text-accent/70">// sys</span>
+            online · vercel · railway · supabase · claude · voice runs in-browser
           </footer>
         </div>
       </body>

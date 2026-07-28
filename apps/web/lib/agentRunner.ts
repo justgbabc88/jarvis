@@ -61,12 +61,34 @@ const CLIENT_TOOLS: Anthropic.Tool[] = [
     input_schema: { type: "object" as const, properties: {} },
   },
   {
+    name: "create_tracker",
+    description:
+      "Create a daily tracker — a number the owner logs every day (e.g. 'Cold outreach sent'). " +
+      "Jarvis asks for it in the daily Slack prompt and totals it on the dashboard. " +
+      "Use when the owner asks to 'track' something daily.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        name: { type: "string", description: "Short tracker name, e.g. 'Cold outreach sent'" },
+        question: { type: "string", description: "The daily question, e.g. 'How many cold outreach messages went out today?'" },
+        unit: { type: "string", description: "What's being counted (default 'count')" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "get_tracker_stats",
+    description: "List the owner's daily trackers with today's value, 7-day, and all-time totals.",
+    input_schema: { type: "object" as const, properties: {} },
+  },
+  {
     name: "request_approval",
     description:
       "Queue an action that would send a message, post publicly, delete something, or spend money. " +
       "It will NOT happen until the owner approves it in the app — but when they tap Approve it EXECUTES " +
       "AUTOMATICALLY from `payload`, so the payload must be complete and exact. Executable payload formats:\n" +
       '  email:       { "action": "email.send", "to": "a@b.com", "subject": "...", "body": "full text", "cc"?: "..." }\n' +
+      '  Slack:       { "action": "slack.post", "text": "message to post" }\n' +
       '  Meta budget: { "action": "meta.budget_update", "object_type": "adset"|"campaign", "object_id": "123", "daily_budget_cents": 5000 }\n' +
       "Other actions have no executor yet — still queue them with a clear payload so the owner can act manually.",
     input_schema: {
@@ -131,6 +153,22 @@ async function execTool(name: string, input: any, ctx: RunContext): Promise<unkn
     };
   }
 
+  if (name === "create_tracker") {
+    const { createTracker } = await import("./trackers");
+    if (!input?.name) return { ok: false, error: "name is required" };
+    const t = await createTracker({
+      name: String(input.name),
+      question: input.question ? String(input.question) : undefined,
+      unit: input.unit ? String(input.unit) : undefined,
+    });
+    return { ok: true, tracker_id: t.id, name: t.name, note: "Tracker live: daily Slack prompt + dashboard totals." };
+  }
+
+  if (name === "get_tracker_stats") {
+    const { listTrackersWithStats } = await import("./trackers");
+    return await listTrackersWithStats(true);
+  }
+
   if (name === "request_approval") {
     const kind = ["send", "post", "delete", "spend", "other"].includes(input.kind) ? input.kind : "other";
     const { data, error } = await db
@@ -172,6 +210,7 @@ function harnessPrompt(name: string, jobDescription: string): string {
     "- You can NEVER directly send, post, delete, or spend. For any such action, call request_approval with a fully-prepared draft/plan, and clearly report it as 'queued for approval' — not done.",
     "- Approved actions execute automatically from your payload, so make payloads exact and complete (final email text, exact ids and amounts).",
     "- Use get_today_agenda when the job involves the owner's schedule or task list.",
+    "- Use create_tracker when the owner wants to track a daily number; get_tracker_stats to report on trackers.",
     "- Be concrete and brief. Prefer doing the work over describing the work.",
     "- Finish with a short report of what you found/did, in plain language, as if leaving a note for the owner.",
     `- Today is ${todayYmd()}; yesterday was ${yesterdayYmd()}.`,
@@ -311,6 +350,17 @@ async function executeJob(opts: {
         : `${opts.name}: ${summary.slice(0, 300)}${ctx.approvalsQueued ? ` (${ctx.approvalsQueued} action${ctx.approvalsQueued === 1 ? "" : "s"} awaiting your approval)` : ""}`,
     meta: { trigger: opts.trigger, approvals_queued: ctx.approvalsQueued },
   });
+
+  // Slack the owner about scheduled/goal runs and anything needing approval.
+  if (opts.trigger !== "manual" || ctx.approvalsQueued > 0) {
+    const { notifySlack, appUrl } = await import("./notify");
+    const head =
+      status === "failed" ? `⚠️ *${opts.name}* failed` : `🤖 *${opts.name}* (${opts.trigger})`;
+    const approvalsLine = ctx.approvalsQueued
+      ? `\n👉 ${ctx.approvalsQueued} action${ctx.approvalsQueued === 1 ? "" : "s"} waiting for your approval${appUrl("/approvals") ? `: ${appUrl("/approvals")}` : " — open Jarvis → Approvals"}`
+      : "";
+    await notifySlack(`${head}\n${summary.slice(0, 500)}${approvalsLine}`);
+  }
 
   return { runId: run.id, status, summary, approvalsQueued: ctx.approvalsQueued };
 }

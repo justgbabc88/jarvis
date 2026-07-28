@@ -33,7 +33,14 @@ no Retell, no paid service.
 - **Calendar + tasks** — connect a private ICS feed (Google Calendar) and ClickUp;
   the dashboard's "today" panel, voice answers, agents, and the briefing all see them.
 - **Daily briefing** — the worker auto-generates a spoken-style morning briefing
-  (default 7am, your timezone); one tap on the dashboard reads it aloud, free.
+  (default 7am, your timezone); one tap on the dashboard reads it aloud, free —
+  and it posts to **Slack** too, if connected.
+- **Slack** — one webhook URL connects a channel: briefing, agent reports, and
+  approval alerts post there, and agents can draft `slack.post` messages that go
+  out when you approve them.
+- **Daily trackers** — "create a cold outreach tracker" and Jarvis asks for the
+  number in Slack every morning and totals it (today / 7d / all-time) on the
+  dashboard. Agents can create trackers from plain English.
 
 ## What's next
 

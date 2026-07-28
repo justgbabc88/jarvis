@@ -6,10 +6,10 @@ import {
   getPendingApprovals,
   getActiveGoals,
 } from "@/lib/data";
-import { money } from "@/lib/format";
-import { relativeDay } from "@/lib/format";
 import { getTodayAgenda } from "@/lib/agenda";
+import { relativeDay } from "@/lib/format";
 import VoiceBriefing from "@/components/VoiceBriefing";
+import TrackersCard from "@/components/TrackersCard";
 import BusinessCardView from "@/components/BusinessCardView";
 import SyncButton from "@/components/SyncButton";
 
@@ -38,9 +38,6 @@ export default async function Dashboard() {
     getTodayAgenda(),
   ]);
 
-  const totalRevenue = cards.reduce((a, c) => a + c.monthRevenueCents, 0);
-  const totalSpend = cards.reduce((a, c) => a + c.monthSpendCents, 0);
-
   return (
     <div className="space-y-6">
       <VoiceBriefing />
@@ -62,28 +59,18 @@ export default async function Dashboard() {
         </Link>
       )}
 
-      {/* Top-line snapshot */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="grid grid-cols-2 gap-6 sm:grid-cols-3">
-          <div>
-            <div className="card-title">Revenue · this month</div>
-            <div className="stat text-good">{money(totalRevenue)}</div>
-          </div>
-          <div>
-            <div className="card-title">Ad spend · this month</div>
-            <div className="stat text-bad">{money(totalSpend)}</div>
-          </div>
-          <div>
-            <div className="card-title">Net</div>
-            <div className={`stat ${totalRevenue - totalSpend >= 0 ? "text-good" : "text-bad"}`}>
-              {money(totalRevenue - totalSpend)}
-            </div>
-          </div>
-        </div>
+      {/* Businesses */}
+      <div className="flex items-center gap-3">
+        <span className="font-mono text-[11px] uppercase tracking-[0.25em] text-accent/70">
+          // business units
+        </span>
+        <span className="holo-rule" />
+        <span className="font-mono text-[11px] uppercase tracking-wider text-muted">
+          {cards.length} online
+        </span>
         <SyncButton />
       </div>
 
-      {/* Businesses */}
       {cards.length === 0 ? (
         <div className="card">
           <h2 className="font-semibold">No businesses yet</h2>
@@ -102,6 +89,13 @@ export default async function Dashboard() {
           ))}
         </div>
       )}
+
+      <div className="flex items-center gap-3">
+        <span className="font-mono text-[11px] uppercase tracking-[0.25em] text-accent/70">
+          // systems
+        </span>
+        <span className="holo-rule" />
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         {/* What Jarvis did yesterday */}
@@ -131,7 +125,7 @@ export default async function Dashboard() {
         {/* Tasks & calendar (today) */}
         <div className="card">
           <div className="card-title mb-3">Today · tasks &amp; calendar</div>
-          {!agenda.connected.calendar && !agenda.connected.tasks ? (
+          {!agenda.connected.calendar && !agenda.connected.clickup ? (
             <>
               <p className="text-sm text-muted">
                 Connect a calendar and task tool to see what’s on your plate today.
@@ -144,45 +138,38 @@ export default async function Dashboard() {
             <div className="space-y-4">
               {agenda.connected.calendar && (
                 <div>
-                  <div className="text-xs uppercase tracking-wide text-muted">Calendar</div>
+                  <div className="text-xs font-medium uppercase text-muted">Calendar</div>
                   {agenda.events.length === 0 ? (
                     <p className="mt-1 text-sm text-muted">Nothing on the calendar today.</p>
                   ) : (
                     <ul className="mt-1 space-y-1">
-                      {agenda.events.map((e, i) => (
-                        <li key={i} className="text-sm">
-                          <span className="text-accent2">{e.allDay ? "all day" : e.start}</span>{" "}
-                          {e.title}
-                          {e.location ? <span className="text-muted"> · {e.location}</span> : null}
+                      {agenda.events.slice(0, 8).map((e, i) => (
+                        <li key={i} className="flex items-baseline gap-2 text-sm">
+                          <span className="w-14 shrink-0 text-xs text-accent2">{e.time}</span>
+                          <span>{e.summary}</span>
                         </li>
                       ))}
                     </ul>
                   )}
                 </div>
               )}
-              {agenda.connected.tasks && (
+              {agenda.connected.clickup && (
                 <div>
-                  <div className="text-xs uppercase tracking-wide text-muted">Tasks due</div>
+                  <div className="text-xs font-medium uppercase text-muted">Tasks due</div>
                   {agenda.tasks.length === 0 ? (
-                    <p className="mt-1 text-sm text-muted">Nothing due today. 🎉</p>
+                    <p className="mt-1 text-sm text-muted">Nothing due today. Clear plate.</p>
                   ) : (
                     <ul className="mt-1 space-y-1">
-                      {agenda.tasks.slice(0, 8).map((t, i) => (
-                        <li key={i} className="text-sm">
-                          {t.overdue && <span className="text-bad">overdue · </span>}
-                          {t.url ? (
-                            <a href={t.url} target="_blank" className="hover:underline">
-                              {t.title}
-                            </a>
-                          ) : (
-                            t.title
-                          )}
-                          {t.list ? <span className="text-muted"> · {t.list}</span> : null}
+                      {agenda.tasks.slice(0, 8).map((t) => (
+                        <li key={t.id} className="flex items-baseline gap-2 text-sm">
+                          <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-accent2" />
+                          <a href={t.url} target="_blank" rel="noreferrer" className="hover:underline">
+                            {t.name}
+                          </a>
+                          {t.overdue && <span className="pill text-bad">overdue</span>}
+                          {t.listName && <span className="text-xs text-muted">{t.listName}</span>}
                         </li>
                       ))}
-                      {agenda.tasks.length > 8 && (
-                        <li className="text-xs text-muted">+ {agenda.tasks.length - 8} more</li>
-                      )}
                     </ul>
                   )}
                 </div>
@@ -194,6 +181,8 @@ export default async function Dashboard() {
           )}
         </div>
       </div>
+
+      <TrackersCard />
 
       {/* Goals teaser */}
       <div className="card">

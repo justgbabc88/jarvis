@@ -110,6 +110,18 @@ export async function POST(req: NextRequest) {
       meta: { briefing_date: today },
     });
 
+    // Post the briefing (and today's tracker prompts) to Slack, if connected.
+    const { notifySlack, appUrl } = await import("@/lib/notify");
+    const { listTrackersWithStats } = await import("@/lib/trackers");
+    const trackers = await listTrackersWithStats(true).catch(() => []);
+    const unlogged = trackers.filter((t) => t.today == null);
+    const trackerLines = unlogged.length
+      ? "\n\n📋 *Daily trackers to log:*\n" +
+        unlogged.map((t) => `• ${t.question || t.name} (7d: ${t.last7})`).join("\n") +
+        (appUrl() ? `\nLog them: ${appUrl("/")}` : "\nLog them on the Jarvis dashboard.")
+      : "";
+    await notifySlack(`🌅 *Morning briefing — ${today}*\n${content}${trackerLines}`);
+
     return NextResponse.json({ briefing: saved, generated: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });

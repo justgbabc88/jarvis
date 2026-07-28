@@ -6,7 +6,7 @@ Three pieces: **Supabase** (database), **Vercel** (web app), **Railway** (worker
 
 1. Create a project at supabase.com.
 2. In the SQL editor, paste and run each file in `supabase/migrations/` **in order**:
-   `0001_init.sql`, `0002_agents.sql`, `0003_actions_briefings.sql`
+   `0001_init.sql`, `0002_agents.sql`, `0003_actions_briefings.sql`, `0004_trackers.sql`
    (or `supabase db push`).
 3. Grab from Project Settings → API:
    - Project URL → `NEXT_PUBLIC_SUPABASE_URL`
@@ -35,6 +35,11 @@ Three pieces: **Supabase** (database), **Vercel** (web app), **Railway** (worker
 
 > If the monorepo root directory isn't selectable, set Vercel's
 > "Root Directory" to `apps/web` and leave install command as `npm install`.
+
+> ⚠️ **Enter Vercel env values by hand in the dashboard.** Writing them
+> through Vercel's API from a Claude cloud session silently corrupts them:
+> the sandbox's security proxy seals every value in transit (anti-exfiltration)
+> and Vercel stores the sealed blobs. Railway's API is not affected.
 
 ## 3. Railway (worker)
 
@@ -68,11 +73,22 @@ In the app:
   - **Meta** (access token + ad account id) — ad spend, and approved budget changes
   - **Email (SMTP)** — lets approved emails actually send (Gmail: `smtp.gmail.com`,
     port 587, your address + an [app password](https://myaccount.google.com/apppasswords))
-  - **Calendar (ICS)** — Google Calendar → Settings → your calendar → "Secret address
-    in iCal format" → paste the URL
-  - **ClickUp** — Settings → Apps → API token
+  - **Slack** (incoming webhook URL) — daily briefing, tracker prompts, agent
+    reports, and approval alerts post to your channel; also powers the approved
+    `slack.post` action. api.slack.com/apps → create app → Incoming Webhooks.
+  - **Google Calendar** — Settings → your calendar → "Secret address in iCal
+    format" → paste the URL
+  - **ClickUp** — Settings → Apps → API token (optionally pick one list)
 
   Use **Test** to confirm each before saving, then **Sync now** on the dashboard.
+
+## Daily trackers
+
+Say "create a cold outreach tracker" to an agent (or add one on the dashboard).
+Every morning the Slack briefing asks for any unlogged tracker numbers with a
+link to the one-tap log form; totals (today / 7-day / all-time) live on the
+dashboard. Optional: set `APP_PUBLIC_URL=https://your-app.vercel.app` on Vercel
+so Slack messages link straight to the app (auto-detected on Vercel otherwise).
 
 ## 5. Approved actions actually run
 

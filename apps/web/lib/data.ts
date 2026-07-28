@@ -65,6 +65,25 @@ export async function getBusinessCards(): Promise<BusinessCard[]> {
   });
 }
 
+export type DailyMetric = {
+  business_id: string;
+  metric_date: string;
+  revenue_cents: number;
+  ad_spend_cents: number;
+};
+
+/** Per-day metrics for the last `days` days, oldest first (for Q&A/briefings). */
+export async function getDailyMetrics(days = 60): Promise<DailyMetric[]> {
+  const db = supabaseAdmin();
+  const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  const { data } = await db
+    .from("metric_snapshots")
+    .select("business_id, metric_date, revenue_cents, ad_spend_cents")
+    .gte("metric_date", since)
+    .order("metric_date");
+  return (data as DailyMetric[]) || [];
+}
+
 export type ActivityItem = {
   id: string;
   type: string;
