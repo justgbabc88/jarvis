@@ -442,6 +442,27 @@ const SET_PERSONA_TOOL: Anthropic.Tool = {
   },
 };
 
+const FIND_USER_TOOL: Anthropic.Tool = {
+  name: "find_slack_user",
+  description:
+    "Look up a Slack workspace member by name (e.g. 'Dwight') and get their member id + ready-to-use <@U…> mention. " +
+    "Use before send_slack_message or tracker mentions when you only have a name.",
+  input_schema: {
+    type: "object" as const,
+    properties: { name: { type: "string" } },
+    required: ["name"],
+  },
+};
+
+async function execFindUser(input: any): Promise<unknown> {
+  const { getProviderCreds } = await import("./connectors");
+  const { resolveSlackUser } = await import("./connectors/slack");
+  const creds = await getProviderCreds<any>("slack");
+  if (!creds?.bot_token) return { ok: false, error: "no Slack bot token configured" };
+  const u = await resolveSlackUser(creds, String(input.name));
+  return { ok: true, id: u.id, name: u.name, mention: `<@${u.id}>` };
+}
+
 const SET_NAME_TOOL: Anthropic.Tool = {
   name: "set_assistant_name",
   description:
@@ -469,7 +490,11 @@ const SEND_TOOL: Anthropic.Tool = {
     type: "object" as const,
     properties: {
       channel: { type: "string", description: "'#general' or a channel id the bot is in" },
-      text: { type: "string", description: "The exact message to post. Use <@U…> ids for mentions." },
+      text: {
+        type: "string",
+        description:
+          "The exact message to post. For @mentions use <@U…> ids — call find_slack_user first when you only have a name.",
+      },
     },
     required: ["channel", "text"],
   },
@@ -543,7 +568,7 @@ export async function answerQuestion(
   // Non-owners get read-only questions + tracker logging; the owner gets
   // the full config toolkit (and sending, when enabled above).
   const tools = isOwner
-    ? [...ADMIN_TOOLS, SET_PERSONA_TOOL, SET_NAME_TOOL, ...(canSend ? [SEND_TOOL] : [])]
+    ? [...ADMIN_TOOLS, SET_PERSONA_TOOL, SET_NAME_TOOL, FIND_USER_TOOL, ...(canSend ? [SEND_TOOL] : [])]
     : ADMIN_TOOLS.filter((t) => ["list_config", "log_tracker"].includes(t.name));
 
   const messages: Anthropic.MessageParam[] = [
@@ -588,6 +613,10 @@ export async function answerQuestion(
               ? canSend
                 ? await execSendMessage(tu.input)
                 : { ok: false, error: "sending is not enabled for this requester" }
+              : tu.name === "find_slack_user"
+                ? isOwner
+                  ? await execFindUser(tu.input)
+                  : { ok: false, error: "owner only" }
               : ["set_persona", "set_assistant_name"].includes(tu.name) && !isOwner
                 ? { ok: false, error: "only the owner can change that" }
                 : await execAdminTool(tu.name, tu.input);
