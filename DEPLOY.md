@@ -101,6 +101,8 @@ oauth_config:
       - im:history
       - app_mentions:read
       - incoming-webhook
+      - channels:read   # find "#general" by name for tracker prompts
+      - users:read      # find "Dwight" by name for @mentions
 settings:
   event_subscriptions:
     request_url: https://YOUR-APP.vercel.app/api/slack/events
@@ -136,11 +138,21 @@ What you get:
 
 ## Daily trackers
 
-Say "create a cold outreach tracker" to an agent (or add one on the dashboard).
-Every morning the Slack briefing asks for any unlogged tracker numbers with a
-link to the one-tap log form; totals (today / 7-day / all-time) live on the
-dashboard. Optional: set `APP_PUBLIC_URL=https://your-app.vercel.app` on Vercel
-so Slack messages link straight to the app (auto-detected on Vercel otherwise).
+Say "create a cold outreach tracker" to Jarvis in Slack (or add one on the
+dashboard). Every morning the Slack briefing asks for any unlogged tracker
+numbers with a link to the one-tap log form; totals (today / 7-day / all-time)
+live on the dashboard.
+
+Trackers can also be **multi-field forms with their own Slack schedule** —
+tell Jarvis e.g. *"create a tracker with these 5 metrics that posts a form in
+#general at 4pm tagging Dwight"*. Requirements for that:
+- the app has the `channels:read` + `users:read` scopes (reinstall after adding)
+- the bot is invited to the target channel (`/invite @jarvis`)
+- the tagged person fills the linked `/track/<id>` form; totals roll up on the
+  dashboard
+
+Optional: set `APP_PUBLIC_URL=https://your-app.vercel.app` on Vercel so Slack
+messages link straight to the app (auto-detected on Vercel otherwise).
 
 ## 5. Approved actions actually run
 

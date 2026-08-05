@@ -60,6 +60,24 @@ async function tickAgents(): Promise<void> {
   }
 }
 
+async function tickTrackers(): Promise<void> {
+  const url = `${APP_URL}/api/trackers/run-due`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${CRON_SECRET}`, "Content-Type": "application/json" },
+    });
+    const body: any = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.error(`[trackers] tick failed (${res.status})`, body);
+    } else if (body.due > 0) {
+      console.log(`[trackers] prompted ${body.due} tracker(s):`, body.results);
+    }
+  } catch (err) {
+    console.error("[trackers] error reaching app:", err);
+  }
+}
+
 async function generateBriefing(): Promise<void> {
   const url = `${APP_URL}/api/briefing`;
   try {
@@ -102,9 +120,10 @@ async function main() {
     void syncSnapshots();
   });
 
-  // Agent scheduler tick: every minute, ask the app which agents are due.
+  // Agent + tracker scheduler tick: every minute, ask the app what's due.
   cron.schedule("* * * * *", () => {
     void tickAgents();
+    void tickTrackers();
   });
 
   // Morning briefing, evaluated in the owner's timezone so "7am" means 7am.

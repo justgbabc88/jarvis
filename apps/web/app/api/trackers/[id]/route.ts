@@ -5,13 +5,16 @@ import { logTrackerEntry } from "@/lib/trackers";
 
 export const dynamic = "force-dynamic";
 
-const LogSchema = z.object({
-  value: z.number().finite(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  note: z.string().max(500).optional(),
-});
+const LogSchema = z
+  .object({
+    value: z.number().finite().optional(),
+    values: z.record(z.number().finite()).optional(),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    note: z.string().max(500).optional(),
+  })
+  .refine((d) => d.value !== undefined || d.values, { message: "provide value or values" });
 
-/** Log (or overwrite) a day's value for this tracker. */
+/** Log (or overwrite) a day's numbers for this tracker. */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   const parsed = LogSchema.safeParse(await req.json().catch(() => ({})));
@@ -19,7 +22,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   try {
-    await logTrackerEntry(id, parsed.data.value, parsed.data);
+    await logTrackerEntry(id, parsed.data.value ?? null, parsed.data);
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });

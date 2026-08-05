@@ -95,6 +95,61 @@ export function verifySlackSignature(
   }
 }
 
+async function slackApi(creds: SlackCreds, method: string, params: Record<string, string> = {}): Promise<any> {
+  if (!creds?.bot_token) throw new Error("no bot token configured");
+  const url = new URL(`https://slack.com/api/${method}`);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${creds.bot_token}` } });
+  const json: any = await res.json().catch(() => ({}));
+  if (!json.ok) throw new Error(`Slack ${method} failed: ${json.error || res.status}`);
+  return json;
+}
+
+/**
+ * "#general" → channel id. Needs the channels:read scope. The bot must
+ * also be a member of the channel to post there (invite it with /invite).
+ */
+export async function resolveSlackChannel(creds: SlackCreds, name: string): Promise<{ id: string; name: string }> {
+  const wanted = name.replace(/^#/, "").toLowerCase();
+  if (/^C[A-Z0-9]{6,}$/i.test(name)) return { id: name, name };
+  let cursor = "";
+  for (let i = 0; i < 10; i++) {
+    const j = await slackApi(creds, "conversations.list", {
+      types: "public_channel,private_channel",
+      limit: "200",
+      exclude_archived: "true",
+      ...(cursor ? { cursor } : {}),
+    });
+    const hit = (j.channels || []).find((c: any) => c.name?.toLowerCase() === wanted);
+    if (hit) return { id: hit.id, name: hit.name };
+    cursor = j.response_metadata?.next_cursor || "";
+    if (!cursor) break;
+  }
+  throw new Error(`channel "${name}" not found (is the app missing the channels:read scope?)`);
+}
+
+/** "Dwight" → member id for an <@U…> mention. Needs the users:read scope. */
+export async function resolveSlackUser(creds: SlackCreds, name: string): Promise<{ id: string; name: string }> {
+  if (/^U[A-Z0-9]{6,}$/i.test(name)) return { id: name, name };
+  const wanted = name.replace(/^@/, "").toLowerCase();
+  let cursor = "";
+  for (let i = 0; i < 10; i++) {
+    const j = await slackApi(creds, "users.list", { limit: "200", ...(cursor ? { cursor } : {}) });
+    const hit = (j.members || []).find(
+      (m: any) =>
+        !m.deleted &&
+        !m.is_bot &&
+        [m.name, m.real_name, m.profile?.display_name, m.profile?.real_name]
+          .filter(Boolean)
+          .some((n: string) => n.toLowerCase().includes(wanted))
+    );
+    if (hit) return { id: hit.id, name: hit.profile?.display_name || hit.real_name || hit.name };
+    cursor = j.response_metadata?.next_cursor || "";
+    if (!cursor) break;
+  }
+  throw new Error(`user "${name}" not found (is the app missing the users:read scope?)`);
+}
+
 /** Live check for the Connections "Test" button. */
 export async function verifySlack(creds: SlackCreds): Promise<string> {
   const parts: string[] = [];

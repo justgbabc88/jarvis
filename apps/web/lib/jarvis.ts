@@ -180,14 +180,60 @@ const ADMIN_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "create_tracker",
-    description: "Create a daily tracker (daily Slack prompt + dashboard totals).",
+    description:
+      "Create a daily tracker. Simple: just a name → one number a day. FORM: pass `fields` (one per metric) " +
+      "and each day gets a multi-field form. Optional Slack delivery: `slack_channel` (e.g. '#general'), " +
+      "`prompt_time` ('16:00', 24h in the owner's timezone), `mention` (person's name to tag, e.g. 'Dwight'). " +
+      "The prompt posts daily with a link to the form.",
     input_schema: {
       type: "object" as const,
       properties: {
         name: { type: "string" },
         question: { type: "string" },
+        fields: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string" },
+              target: { type: "number", description: "optional daily target shown on the form" },
+            },
+            required: ["label"],
+          },
+        },
+        slack_channel: { type: "string", description: "'#general' — bot must be invited there" },
+        prompt_time: { type: "string", description: "'16:00' (24h, owner's timezone)" },
+        mention: { type: "string", description: "name of the person to @tag in the prompt" },
       },
       required: ["name"],
+    },
+  },
+  {
+    name: "update_tracker",
+    description:
+      "Update an existing tracker: rename, change fields, or change Slack delivery (channel / prompt_time / mention). Get the id from list_config.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        tracker_id: { type: "string" },
+        name: { type: "string" },
+        question: { type: "string" },
+        fields: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string" },
+              target: { type: "number" },
+            },
+            required: ["label"],
+          },
+        },
+        slack_channel: { type: "string" },
+        prompt_time: { type: "string" },
+        mention: { type: "string" },
+      },
+      required: ["tracker_id"],
     },
   },
   {
@@ -255,13 +301,68 @@ async function execAdminTool(name: string, input: any): Promise<unknown> {
     return { ok: true, id: data.id, name: data.name };
   }
 
-  if (name === "create_tracker") {
-    const { createTracker } = await import("./trackers");
-    const t = await createTracker({
-      name: String(input.name),
+  if (name === "create_tracker" || name === "update_tracker") {
+    const { createTracker, updateTracker } = await import("./trackers");
+
+    // Resolve "#general" / "Dwight" to Slack ids when delivery is requested.
+    let slack: Record<string, string> | undefined;
+    if (input.slack_channel || input.prompt_time || input.mention) {
+      slack = {};
+      if (input.prompt_time) {
+        const m = /^(\d{1,2}):(\d{2})$/.exec(String(input.prompt_time));
+        if (!m) return { ok: false, error: "prompt_time must be HH:MM (24h)" };
+        slack.prompt_time = `${m[1].padStart(2, "0")}:${m[2]}`;
+      }
+      const { getProviderCreds } = await import("./connectors");
+      const { resolveSlackChannel, resolveSlackUser } = await import("./connectors/slack");
+      const creds = await getProviderCreds<any>("slack");
+      if (input.slack_channel) {
+        if (!creds?.bot_token)
+          return { ok: false, error: "custom channels need a Slack bot token saved in Connections" };
+        try {
+          const ch = await resolveSlackChannel(creds, String(input.slack_channel));
+          slack.channel = `#${ch.name.replace(/^#/, "")}`;
+          slack.channel_id = ch.id;
+        } catch (e: any) {
+          return { ok: false, error: e.message, hint: "Is the app reinstalled with channels:read? Is the bot invited to the channel?" };
+        }
+      }
+      if (input.mention) {
+        try {
+          const u = await resolveSlackUser(creds, String(input.mention));
+          slack.mention = `<@${u.id}>`;
+          slack.mention_name = u.name;
+        } catch (e: any) {
+          return { ok: false, error: e.message, hint: "Is the app reinstalled with users:read?" };
+        }
+      }
+    }
+
+    if (name === "create_tracker") {
+      const t = await createTracker({
+        name: String(input.name),
+        question: input.question ? String(input.question) : undefined,
+        fields: Array.isArray(input.fields) ? input.fields : undefined,
+        slack,
+      });
+      return {
+        ok: true,
+        tracker_id: t.id,
+        name: t.name,
+        note: slack?.prompt_time
+          ? `Prompt scheduled ${slack.prompt_time} daily${slack.channel ? ` in ${slack.channel}` : ""}${slack.mention_name ? `, tagging ${slack.mention_name}` : ""}. Remind the owner to /invite the bot to that channel.`
+          : "Included in the morning briefing prompt.",
+      };
+    }
+
+    await updateTracker(String(input.tracker_id), {
+      name: input.name ? String(input.name) : undefined,
       question: input.question ? String(input.question) : undefined,
+      fields: Array.isArray(input.fields) ? input.fields : undefined,
+      slack,
     });
-    return { ok: true, tracker_id: t.id, name: t.name };
+    await logChange(`Updated tracker settings (via chat).`);
+    return { ok: true };
   }
 
   if (name === "log_tracker") {
@@ -277,7 +378,9 @@ async function execAdminTool(name: string, input: any): Promise<unknown> {
 }
 
 const ADMIN_RULES = [
-  "You can make configuration changes with your tools when the user asks: rename businesses/connections, add businesses, create trackers, log tracker values.",
+  "You can make configuration changes with your tools when the user asks: rename businesses/connections, add businesses, create/update trackers, log tracker values.",
+  "Trackers can be multi-field FORMS with their own daily Slack prompt: custom channel, time (owner's timezone), and an @mention of the person who fills it out — use create_tracker/update_tracker with fields, slack_channel, prompt_time, mention.",
+  "If a channel prompt is set up, remind the owner to /invite the bot to that channel once.",
   "Call list_config first to find the right id; confirm what you changed in your reply.",
   "You can NOT delete anything, edit credentials, send, post, or spend from chat — for those, point the user to the Jarvis app (deletes/credentials) or remind them that agents queue such actions for approval.",
 ].join(" ");

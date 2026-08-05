@@ -114,7 +114,8 @@ export async function POST(req: NextRequest) {
     const { notifySlack, appUrl } = await import("@/lib/notify");
     const { listTrackersWithStats } = await import("@/lib/trackers");
     const trackers = await listTrackersWithStats(true).catch(() => []);
-    const unlogged = trackers.filter((t) => t.today == null);
+    // Trackers with their own scheduled prompt aren't nagged here too.
+    const unlogged = trackers.filter((t) => t.today == null && !t.slack?.prompt_time);
     const trackerLines = unlogged.length
       ? "\n\n📋 *Daily trackers to log:*\n" +
         unlogged.map((t) => `• ${t.question || t.name} (7d: ${t.last7})`).join("\n") +

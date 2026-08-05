@@ -7,6 +7,8 @@ type Tracker = {
   name: string;
   question: string | null;
   unit: string;
+  fields: { key: string; label: string }[];
+  slack: { channel?: string; prompt_time?: string; mention_name?: string };
   today: number | null;
   last7: number;
   total: number;
@@ -87,21 +89,32 @@ export default function TrackersCard() {
               <div className="text-sm font-medium">{t.name}</div>
               <div className="text-xs text-muted">
                 today: {t.today ?? "—"} · 7d: {t.last7} · total: {t.total}
+                {t.slack?.prompt_time
+                  ? ` · prompts ${t.slack.channel || "Slack"} at ${t.slack.prompt_time}${t.slack.mention_name ? ` (@${t.slack.mention_name})` : ""}`
+                  : ""}
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <input
-                className="input w-24"
-                type="number"
-                inputMode="decimal"
-                placeholder={t.today == null ? "today?" : String(t.today)}
-                value={values[t.id] || ""}
-                onChange={(e) => setValues((v) => ({ ...v, [t.id]: e.target.value }))}
-                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), log(t))}
-              />
-              <button className="btn" disabled={busy} onClick={() => log(t)}>
-                Log
-              </button>
+              {t.fields?.length > 0 ? (
+                <a href={`/track/${t.id}`} className="btn">
+                  Open form ({t.fields.length})
+                </a>
+              ) : (
+                <>
+                  <input
+                    className="input w-24"
+                    type="number"
+                    inputMode="decimal"
+                    placeholder={t.today == null ? "today?" : String(t.today)}
+                    value={values[t.id] || ""}
+                    onChange={(e) => setValues((v) => ({ ...v, [t.id]: e.target.value }))}
+                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), log(t))}
+                  />
+                  <button className="btn" disabled={busy} onClick={() => log(t)}>
+                    Log
+                  </button>
+                </>
+              )}
               <button
                 className="btn text-muted"
                 title="Archive tracker"
