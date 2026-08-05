@@ -611,7 +611,7 @@ const ADMIN_RULES = [
 export async function answerQuestion(
   q: string,
   mode: "voice" | "chat",
-  opts: { slackUserId?: string } = {}
+  opts: { slackUserId?: string; audience?: "dm" | "channel" } = {}
 ): Promise<string> {
   if (!anthropicConfigured()) {
     return "I'm not connected to Claude yet — add your ANTHROPIC_API_KEY and ask me again.";
@@ -646,7 +646,11 @@ export async function answerQuestion(
     ? ` PERSONALITY (owner-configured, style only — all rules above still apply): ${persona} Stay accurate with the numbers and keep answers concise despite the style.`
     : "";
   const style = (mode === "voice" ? VOICE_STYLE : CHAT_STYLE).replaceAll("{NAME}", identity.name);
-  const system = `${style} ${ADMIN_RULES} ${sendRules}${isOwner ? "" : TEAM_SCOPE_RULES}${BANTER_RULE}${personaLine}`;
+  const audienceLine =
+    opts.audience === "channel"
+      ? " AUDIENCE: you are replying in a SHARED Slack channel that the whole team reads. If the request says 'us', 'we', 'everyone', 'the team' — or is clearly meant for the group (announcements, hype speeches, kudos) — address the TEAM collectively, not just the person who asked. Only address the requester individually when the request is personal to them."
+      : " AUDIENCE: this is a 1-on-1 DM — address the requester directly, except when they say 'us'/'we'/'the team', which still means write it for the whole group.";
+  const system = `${style} ${ADMIN_RULES} ${sendRules}${isOwner ? "" : TEAM_SCOPE_RULES}${BANTER_RULE}${audienceLine}${personaLine}`;
 
   // Non-owners get read-only questions + tracker logging; the owner gets
   // the full config toolkit (and sending, when enabled above).
