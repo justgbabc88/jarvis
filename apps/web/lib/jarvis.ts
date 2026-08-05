@@ -204,6 +204,10 @@ const ADMIN_TOOLS: Anthropic.Tool[] = [
         slack_channel: { type: "string", description: "'#general' — bot must be invited there" },
         prompt_time: { type: "string", description: "'16:00' (24h, owner's timezone)" },
         mention: { type: "string", description: "name of the person to @tag in the prompt" },
+        on_submit_message: {
+          type: "string",
+          description: "Template posted when the form is submitted. Placeholders: {mention} {name} {total}",
+        },
       },
       required: ["name"],
     },
@@ -232,6 +236,12 @@ const ADMIN_TOOLS: Anthropic.Tool[] = [
         slack_channel: { type: "string" },
         prompt_time: { type: "string" },
         mention: { type: "string" },
+        on_submit_message: {
+          type: "string",
+          description:
+            "Owner-authored template posted to the channel whenever the form is submitted (e.g. praise). " +
+            "Placeholders: {mention} {name} {total}. This is owner-configured automation, allowed from chat.",
+        },
       },
       required: ["tracker_id"],
     },
@@ -306,8 +316,9 @@ async function execAdminTool(name: string, input: any): Promise<unknown> {
 
     // Resolve "#general" / "Dwight" to Slack ids when delivery is requested.
     let slack: Record<string, string> | undefined;
-    if (input.slack_channel || input.prompt_time || input.mention) {
+    if (input.slack_channel || input.prompt_time || input.mention || input.on_submit_message) {
       slack = {};
+      if (input.on_submit_message) slack.on_submit_message = String(input.on_submit_message).slice(0, 500);
       if (input.prompt_time) {
         const m = /^(\d{1,2}):(\d{2})$/.exec(String(input.prompt_time));
         if (!m) return { ok: false, error: "prompt_time must be HH:MM (24h)" };
@@ -380,6 +391,7 @@ async function execAdminTool(name: string, input: any): Promise<unknown> {
 const ADMIN_RULES = [
   "You can make configuration changes with your tools when the user asks: rename businesses/connections, add businesses, create/update trackers, log tracker values.",
   "Trackers can be multi-field FORMS with their own daily Slack prompt: custom channel, time (owner's timezone), and an @mention of the person who fills it out — use create_tracker/update_tracker with fields, slack_channel, prompt_time, mention.",
+  "A tracker can also post an owner-authored on_submit_message to its channel when the form is submitted (placeholders {mention} {name} {total}) — that's owner-configured automation and IS allowed from chat, e.g. a praise message when someone logs their numbers.",
   "If a channel prompt is set up, remind the owner to /invite the bot to that channel once.",
   "Call list_config first to find the right id; confirm what you changed in your reply.",
   "You can NOT delete anything, edit credentials, send, post, or spend from chat — for those, point the user to the Jarvis app (deletes/credentials) or remind them that agents queue such actions for approval.",

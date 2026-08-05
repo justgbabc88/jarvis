@@ -20,6 +20,9 @@ export type TrackerSlack = {
   mention?: string;        // "<@U…>"
   mention_name?: string;   // "Dwight"
   last_prompt_date?: string;
+  // Owner-authored template posted to the channel when the form is
+  // submitted. Placeholders: {mention} {name} {total}
+  on_submit_message?: string;
 };
 
 export type TrackerWithStats = {

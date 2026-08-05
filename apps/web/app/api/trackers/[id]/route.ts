@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabase";
-import { logTrackerEntry } from "@/lib/trackers";
+import { logTrackerEntry, getTracker, TrackerSlack } from "@/lib/trackers";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,32 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   }
   try {
     await logTrackerEntry(id, parsed.data.value ?? null, parsed.data);
+
+    // Owner-configured "on submit" message (e.g. praise when Dwight logs
+    // his numbers). A fixed template the owner authored — posted as-is.
+    after(async () => {
+      try {
+        const t = await getTracker(id);
+        const s: TrackerSlack = t?.slack || {};
+        if (!s.on_submit_message) return;
+        const total =
+          parsed.data.value ??
+          Object.values(parsed.data.values || {}).reduce((a, v) => a + (Number(v) || 0), 0);
+        const text = s.on_submit_message
+          .replaceAll("{mention}", s.mention || "")
+          .replaceAll("{name}", t.name)
+          .replaceAll("{total}", String(total));
+        const { getProviderCreds } = await import("@/lib/connectors");
+        const { postSlackChannel, postSlack } = await import("@/lib/connectors/slack");
+        const creds = await getProviderCreds<any>("slack");
+        if (!creds) return;
+        if (s.channel_id && creds.bot_token) await postSlackChannel(creds, s.channel_id, text);
+        else await postSlack(creds, text);
+      } catch (e: any) {
+        console.error("[tracker] on-submit message failed:", e.message);
+      }
+    });
+
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
