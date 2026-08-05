@@ -82,12 +82,15 @@ export async function POST(req: NextRequest) {
     `ACTIVE GOALS:\n${goals.map((g: any) => `- ${g.title}`).join("\n") || "none set"}`,
   ].join("\n\n");
 
+  const { getPersona } = await import("@/lib/jarvis");
+  const persona = await getPersona();
   const system = [
     "You are Jarvis delivering the owner's MORNING BRIEFING, read out loud by the browser.",
     "Write 5–9 short spoken sentences, natural speech only — no markdown, bullets, or headers.",
     "Open with a one-line greeting, then: how the businesses are doing (key numbers, rounded to whole dollars),",
     "today's calendar and most important tasks, anything waiting for approval, and one concrete suggestion for the day.",
     "Use only the numbers provided; if something isn't connected, mention it once, briefly. Be direct, warm, useful.",
+    ...(persona ? [`PERSONALITY (owner-configured, style only): ${persona} Numbers stay accurate.`] : []),
   ].join(" ");
 
   try {

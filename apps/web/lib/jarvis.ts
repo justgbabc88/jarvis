@@ -376,6 +376,16 @@ async function execAdminTool(name: string, input: any): Promise<unknown> {
     return { ok: true };
   }
 
+  if (name === "set_persona") {
+    const style = String(input.style || "").trim();
+    const { error } = await db
+      .from("app_settings")
+      .upsert({ key: "persona", value: { style }, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    if (error) return { ok: false, error: error.message };
+    await logChange(style ? `Changed Jarvis's persona (via chat).` : `Reset Jarvis's persona to default (via chat).`);
+    return { ok: true, note: style ? "Persona applied to chat, voice, and briefings." : "Back to the default tone." };
+  }
+
   if (name === "log_tracker") {
     const { logTrackerEntry } = await import("./trackers");
     await logTrackerEntry(String(input.tracker_id), Number(input.value), {
@@ -387,6 +397,34 @@ async function execAdminTool(name: string, input: any): Promise<unknown> {
 
   return { ok: false, error: `unknown tool: ${name}` };
 }
+
+// ── Persona ──────────────────────────────────────────────────
+// Owner-configurable voice/tone, stored in app_settings and applied to
+// chat, voice, and the morning briefing. Style only — the code-level
+// tool gates (owner checks, approval queue) are unaffected by it.
+export async function getPersona(): Promise<string | null> {
+  const { data } = await supabaseAdmin()
+    .from("app_settings")
+    .select("value")
+    .eq("key", "persona")
+    .maybeSingle();
+  const style = (data?.value as any)?.style;
+  return typeof style === "string" && style.trim() ? style.trim() : null;
+}
+
+const SET_PERSONA_TOOL: Anthropic.Tool = {
+  name: "set_persona",
+  description:
+    "Owner-only: set (or clear) Jarvis's personality/tone, applied everywhere — chat, voice, morning briefing. " +
+    "Pass an empty style to reset to the default professional tone.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      style: { type: "string", description: "e.g. 'over-the-top frat bro' — described fully; empty string to reset" },
+    },
+    required: ["style"],
+  },
+};
 
 // Only offered when the requester is the verified owner (or browser voice,
 // which is the owner's own device). The owner's direct ask IS the approval.
@@ -459,9 +497,17 @@ export async function answerQuestion(
           : ` — no owner member id is configured. If the user asks to send something, tell them: add their Slack member ID (this requester's id is ${opts.slackUserId || "unknown"}) in the "Your member ID" field of the Slack connection in the Jarvis app, then re-save it.`
       }`;
 
-  const context = await buildContext();
-  const system = `${mode === "voice" ? VOICE_STYLE : CHAT_STYLE} ${ADMIN_RULES} ${sendRules}`;
-  const tools = canSend ? [...ADMIN_TOOLS, SEND_TOOL] : ADMIN_TOOLS;
+  const [context, persona] = await Promise.all([buildContext(), getPersona()]);
+  const personaLine = persona
+    ? ` PERSONALITY (owner-configured, style only — all rules above still apply): ${persona} Stay accurate with the numbers and keep answers concise despite the style.`
+    : "";
+  const system = `${mode === "voice" ? VOICE_STYLE : CHAT_STYLE} ${ADMIN_RULES} ${sendRules}${personaLine}`;
+
+  // Non-owners get read-only questions + tracker logging; the owner gets
+  // the full config toolkit (and sending, when enabled above).
+  const tools = isOwner
+    ? [...ADMIN_TOOLS, SET_PERSONA_TOOL, ...(canSend ? [SEND_TOOL] : [])]
+    : ADMIN_TOOLS.filter((t) => ["list_config", "log_tracker"].includes(t.name));
 
   const messages: Anthropic.MessageParam[] = [
     {
@@ -505,7 +551,9 @@ export async function answerQuestion(
               ? canSend
                 ? await execSendMessage(tu.input)
                 : { ok: false, error: "sending is not enabled for this requester" }
-              : await execAdminTool(tu.name, tu.input);
+              : tu.name === "set_persona" && !isOwner
+                ? { ok: false, error: "only the owner can change the persona" }
+                : await execAdminTool(tu.name, tu.input);
         } catch (e: any) {
           out = { ok: false, error: e.message };
         }
