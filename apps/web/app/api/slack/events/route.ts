@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
 
   after(async () => {
     try {
-      const answer = await answerQuestion(text, "chat");
+      const answer = await answerQuestion(text, "chat", { slackUserId: String(event.user || "") });
       await postSlackChannel(creds, channel, answer, threadTs);
     } catch (e: any) {
       console.error("[slack events] reply failed:", e.message);

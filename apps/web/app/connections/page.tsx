@@ -50,6 +50,11 @@ const PROVIDERS: Record<
       { key: "webhook_url", label: "Incoming webhook URL", placeholder: "https://hooks.slack.com/services/…" },
       { key: "bot_token", label: "Bot token (optional, for chat)", placeholder: "xoxb-…" },
       { key: "signing_secret", label: "Signing secret (optional, for chat + buttons)", placeholder: "Slack app → Basic Information" },
+      {
+        key: "owner_user_id",
+        label: "Your member ID (optional — lets YOU tell Jarvis to send messages)",
+        placeholder: "U0123ABCD · Slack profile → ⋯ → Copy member ID",
+      },
     ],
   },
   email: {

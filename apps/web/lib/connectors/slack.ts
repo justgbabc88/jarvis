@@ -17,6 +17,10 @@ export type SlackCreds = {
   webhook_url?: string;
   bot_token?: string;
   signing_secret?: string;
+  // The owner's Slack member id (U…). When the person chatting with the
+  // bot IS the owner, their direct requests count as approval and Jarvis
+  // may send messages on the spot. Everyone else stays read-only.
+  owner_user_id?: string;
 };
 
 export type SlackBlock = Record<string, unknown>;

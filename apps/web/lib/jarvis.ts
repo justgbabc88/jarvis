@@ -388,6 +388,41 @@ async function execAdminTool(name: string, input: any): Promise<unknown> {
   return { ok: false, error: `unknown tool: ${name}` };
 }
 
+// Only offered when the requester is the verified owner (or browser voice,
+// which is the owner's own device). The owner's direct ask IS the approval.
+const SEND_TOOL: Anthropic.Tool = {
+  name: "send_slack_message",
+  description:
+    "Send a message to a Slack channel RIGHT NOW, as Jarvis. This tool exists because the OWNER is asking " +
+    "directly — their request is the authorization. Use it for one-off messages the owner tells you to send " +
+    "(introductions, reminders, announcements). Write the final message text yourself, ready to post.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      channel: { type: "string", description: "'#general' or a channel id the bot is in" },
+      text: { type: "string", description: "The exact message to post. Use <@U…> ids for mentions." },
+    },
+    required: ["channel", "text"],
+  },
+};
+
+async function execSendMessage(input: any): Promise<unknown> {
+  const { getProviderCreds } = await import("./connectors");
+  const { resolveSlackChannel, postSlackChannel } = await import("./connectors/slack");
+  const creds = await getProviderCreds<any>("slack");
+  if (!creds?.bot_token) return { ok: false, error: "no Slack bot token configured" };
+  const ch = await resolveSlackChannel(creds, String(input.channel));
+  await postSlackChannel(creds, ch.id, String(input.text));
+  await supabaseAdmin()
+    .from("activity_log")
+    .insert({
+      type: "action",
+      summary: `Sent a message to #${ch.name} (you asked in chat).`,
+      meta: { via: "chat", channel: ch.name },
+    });
+  return { ok: true, posted_to: `#${ch.name}` };
+}
+
 const ADMIN_RULES = [
   "You can make configuration changes with your tools when the user asks: rename businesses/connections, add businesses, create/update trackers, log tracker values.",
   "Trackers can be multi-field FORMS with their own daily Slack prompt: custom channel, time (owner's timezone), and an @mention of the person who fills it out — use create_tracker/update_tracker with fields, slack_channel, prompt_time, mention.",
@@ -398,12 +433,35 @@ const ADMIN_RULES = [
 ].join(" ");
 
 /** Answer a question with full business context. mode: spoken vs Slack chat. */
-export async function answerQuestion(q: string, mode: "voice" | "chat"): Promise<string> {
+export async function answerQuestion(
+  q: string,
+  mode: "voice" | "chat",
+  opts: { slackUserId?: string } = {}
+): Promise<string> {
   if (!anthropicConfigured()) {
     return "I'm not connected to Claude yet — add your ANTHROPIC_API_KEY and ask me again.";
   }
+
+  // Owner check: browser voice runs on the owner's device; Slack chat is
+  // owner only when the sender matches the configured owner member id.
+  const { getProviderCreds } = await import("./connectors");
+  const slackCreds = await getProviderCreds<any>("slack");
+  const isOwner =
+    mode === "voice" ||
+    Boolean(slackCreds?.owner_user_id && opts.slackUserId && opts.slackUserId === slackCreds.owner_user_id);
+  const canSend = isOwner && Boolean(slackCreds?.bot_token);
+
+  const sendRules = canSend
+    ? "The verified OWNER is asking, so send_slack_message is available: when they tell you to send/post a Slack message, write it and send it — their request is the approval. Email and money still go through agents + the approval queue."
+    : `Sending is NOT available for this requester${
+        slackCreds?.owner_user_id
+          ? " (they are not the configured owner)"
+          : ` — no owner member id is configured. If the user asks to send something, tell them: add their Slack member ID (this requester's id is ${opts.slackUserId || "unknown"}) in the "Your member ID" field of the Slack connection in the Jarvis app, then re-save it.`
+      }`;
+
   const context = await buildContext();
-  const system = `${mode === "voice" ? VOICE_STYLE : CHAT_STYLE} ${ADMIN_RULES}`;
+  const system = `${mode === "voice" ? VOICE_STYLE : CHAT_STYLE} ${ADMIN_RULES} ${sendRules}`;
+  const tools = canSend ? [...ADMIN_TOOLS, SEND_TOOL] : ADMIN_TOOLS;
 
   const messages: Anthropic.MessageParam[] = [
     {
@@ -420,7 +478,7 @@ export async function answerQuestion(q: string, mode: "voice" | "chat"): Promise
         model: defaultModel(),
         max_tokens: 800,
         system,
-        tools: ADMIN_TOOLS,
+        tools,
         messages,
       });
       messages.push({ role: "assistant", content: res.content });
@@ -442,7 +500,12 @@ export async function answerQuestion(q: string, mode: "voice" | "chat"): Promise
       for (const tu of toolUses) {
         let out: unknown;
         try {
-          out = await execAdminTool(tu.name, tu.input);
+          out =
+            tu.name === "send_slack_message"
+              ? canSend
+                ? await execSendMessage(tu.input)
+                : { ok: false, error: "sending is not enabled for this requester" }
+              : await execAdminTool(tu.name, tu.input);
         } catch (e: any) {
           out = { ok: false, error: e.message };
         }
