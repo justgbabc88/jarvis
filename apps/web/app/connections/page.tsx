@@ -122,7 +122,7 @@ export default function ConnectionsPage() {
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
-    await fetch("/api/connections", {
+    const res = await fetch("/api/connections", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -131,11 +131,18 @@ export default function ConnectionsPage() {
         credentials: creds,
         config: {},
       }),
-    });
+    }).catch(() => null);
+    setBusy(false);
+    if (!res || !res.ok) {
+      const err = res ? await res.json().catch(() => ({})) : {};
+      setTestMsg(
+        `⚠ Save failed: ${typeof err.error === "string" ? err.error : JSON.stringify(err.error || "network error")}`
+      );
+      return; // keep the form so nothing typed is lost
+    }
     setLabel("");
     setCreds({});
-    setTestMsg("");
-    setBusy(false);
+    setTestMsg("✓ Saved.");
     load();
   }
 
