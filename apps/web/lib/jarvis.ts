@@ -63,12 +63,14 @@ function historySection(daily: DailyMetric[], nameById: Map<string, string>): st
   return `HISTORY (per day, oldest first; data starts when each source was connected):\n${parts.join("\n")}`;
 }
 
+// Token economy: the default context is the LIGHT snapshot only. The
+// 60-day daily/weekly history that used to ride along on every message
+// (even banter) now lives behind the get_history tool.
 async function buildContext(): Promise<string> {
-  const [cards, activity, goals, daily, agenda] = await Promise.all([
+  const [cards, activity, goals, agenda] = await Promise.all([
     getBusinessCards(),
     getYesterdayActivity(),
     getActiveGoals(),
-    getDailyMetrics(60),
     getTodayAgenda(),
   ]);
 
@@ -96,7 +98,7 @@ async function buildContext(): Promise<string> {
 
   return [
     `BUSINESSES (month-to-date):\n${businessLines || "none configured"}`,
-    historySection(daily, new Map(cards.map((c) => [c.id, c.name]))),
+    "DAILY/WEEKLY HISTORY: not loaded — call get_history when the question involves trends, specific days/weeks, or comparisons over time.",
     `WHAT JARVIS DID YESTERDAY:\n${
       activity.map((a) => `- ${a.summary}`).join("\n") || "nothing logged"
     }`,
@@ -468,6 +470,43 @@ export async function getPersona(): Promise<string | null> {
   return typeof style === "string" && style.trim() ? style.trim() : null;
 }
 
+const GET_HISTORY_TOOL: Anthropic.Tool = {
+  name: "get_history",
+  description:
+    "Daily and weekly revenue/spend history per business. Call when the question involves trends, " +
+    "specific days or weeks, comparisons over time, or 'biggest/best/worst' periods.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      days: { type: "number", description: "How many days back (default 30, max 90)" },
+    },
+  },
+};
+
+async function execGetHistory(input: any): Promise<string> {
+  const days = Math.min(Math.max(Number(input?.days) || 30, 7), 90);
+  const [cards, daily] = await Promise.all([getBusinessCards(), getDailyMetrics(days)]);
+  return historySection(daily, new Map(cards.map((c) => [c.id, c.name])));
+}
+
+/**
+ * Model for conversational surfaces (chat/voice), separate from agent
+ * runs. Priority: app_settings 'chat_model' (changeable live, no
+ * redeploy) → ANTHROPIC_CHAT_MODEL env → the main model.
+ */
+async function chatModel(): Promise<string> {
+  try {
+    const { data } = await supabaseAdmin()
+      .from("app_settings")
+      .select("value")
+      .eq("key", "chat_model")
+      .maybeSingle();
+    const m = (data?.value as any)?.model;
+    if (typeof m === "string" && m.trim()) return m.trim();
+  } catch {}
+  return process.env.ANTHROPIC_CHAT_MODEL || defaultModel();
+}
+
 const SET_PERSONA_TOOL: Anthropic.Tool = {
   name: "set_persona",
   description:
@@ -654,9 +693,11 @@ export async function answerQuestion(
 
   // Non-owners get read-only questions + tracker logging; the owner gets
   // the full config toolkit (and sending, when enabled above).
-  const tools = isOwner
+  // get_history is owner-only — it's financial data.
+  const tools: Anthropic.Tool[] = isOwner
     ? [
         ...ADMIN_TOOLS,
+        GET_HISTORY_TOOL,
         SET_PERSONA_TOOL,
         SET_NAME_TOOL,
         FIND_USER_TOOL,
@@ -665,6 +706,16 @@ export async function answerQuestion(
         ...(canSend ? [SEND_TOOL] : []),
       ]
     : [...ADMIN_TOOLS.filter((t) => ["list_config", "log_tracker"].includes(t.name)), LIST_TASKS_TOOL];
+
+  // Prompt caching: tools + system are the stable prefix — mark them so
+  // loop turns 2..5 and rapid follow-ups read them at ~10% price.
+  const cachedTools = tools.map((t, i) =>
+    i === tools.length - 1 ? ({ ...t, cache_control: { type: "ephemeral" } } as any) : t
+  );
+  const cachedSystem = [
+    { type: "text" as const, text: system, cache_control: { type: "ephemeral" as const } },
+  ];
+  const model = await chatModel();
 
   const messages: Anthropic.MessageParam[] = [
     {
@@ -678,10 +729,10 @@ export async function answerQuestion(
   try {
     for (let turn = 0; turn < 5; turn++) {
       const res = await anthropic().messages.create({
-        model: defaultModel(),
+        model,
         max_tokens: 800,
-        system,
-        tools,
+        system: cachedSystem as any,
+        tools: cachedTools,
         messages,
       });
       messages.push({ role: "assistant", content: res.content });
@@ -708,6 +759,10 @@ export async function answerQuestion(
               ? canSend
                 ? await execSendMessage(tu.input)
                 : { ok: false, error: "sending is not enabled for this requester" }
+              : tu.name === "get_history"
+                ? isOwner
+                  ? await execGetHistory(tu.input)
+                  : { ok: false, error: "owner only" }
               : tu.name === "find_slack_user"
                 ? isOwner
                   ? await execFindUser(tu.input)
