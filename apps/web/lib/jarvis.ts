@@ -113,6 +113,36 @@ async function buildContext(): Promise<string> {
   ].join("\n\n");
 }
 
+/** Limited context for non-owner team members: trackers + tasks only. */
+async function buildTeamContext(): Promise<string> {
+  const { listTrackersWithStats } = await import("./trackers");
+  const [agenda, trackers] = await Promise.all([
+    getTodayAgenda(),
+    listTrackersWithStats(true).catch(() => []),
+  ]);
+  const trackerLines =
+    trackers
+      .map(
+        (t) =>
+          `- ${t.name}: today ${t.today ?? "not logged yet"}, last 7 days ${t.last7}, all-time ${t.total}`
+      )
+      .join("\n") || "no trackers set up";
+  const taskLines =
+    agenda.tasks
+      .map((t) => `- ${t.name}${t.overdue ? " (OVERDUE)" : ""}${t.listName ? ` [${t.listName}]` : ""}`)
+      .join("\n") || "nothing due today";
+  return `DAILY TRACKERS (team outreach stats):\n${trackerLines}\n\nCLICKUP TASKS DUE TODAY / OVERDUE:\n${taskLines}`;
+}
+
+const TEAM_SCOPE_RULES =
+  " You are talking to a TEAM MEMBER, not the owner. You may ONLY discuss daily tracker stats and ClickUp tasks. " +
+  "If asked about revenue, ad spend, businesses, goals, the calendar, approvals, or configuration, decline warmly and " +
+  "say that's for the owner. Never reveal financial numbers to team members — you have not been given them.";
+
+const BANTER_RULE =
+  " Match the message: casual banter or a greeting gets a short, in-kind reply — do NOT volunteer business reports, " +
+  "metrics, or suggestions unless the user actually asked for them.";
+
 const VOICE_STYLE = [
   "You are {NAME}, a concise personal business assistant being heard OUT LOUD.",
   "Answer in 2–5 short spoken sentences. No markdown, no bullet symbols, no headers — just natural speech.",
@@ -603,8 +633,10 @@ export async function answerQuestion(
       }`;
 
   const { getAssistantIdentity } = await import("./identity");
+  // Non-owners never receive the financial context at all — the model
+  // can't leak numbers it was never given.
   const [context, persona, identity] = await Promise.all([
-    buildContext(),
+    isOwner ? buildContext() : buildTeamContext(),
     getPersona(),
     getAssistantIdentity(),
   ]);
@@ -612,7 +644,7 @@ export async function answerQuestion(
     ? ` PERSONALITY (owner-configured, style only — all rules above still apply): ${persona} Stay accurate with the numbers and keep answers concise despite the style.`
     : "";
   const style = (mode === "voice" ? VOICE_STYLE : CHAT_STYLE).replaceAll("{NAME}", identity.name);
-  const system = `${style} ${ADMIN_RULES} ${sendRules}${personaLine}`;
+  const system = `${style} ${ADMIN_RULES} ${sendRules}${isOwner ? "" : TEAM_SCOPE_RULES}${BANTER_RULE}${personaLine}`;
 
   // Non-owners get read-only questions + tracker logging; the owner gets
   // the full config toolkit (and sending, when enabled above).
@@ -680,7 +712,9 @@ export async function answerQuestion(
                   : await execTaskTool(tu.name, tu.input)
               : ["set_persona", "set_assistant_name"].includes(tu.name) && !isOwner
                 ? { ok: false, error: "only the owner can change that" }
-                : await execAdminTool(tu.name, tu.input);
+                : tu.name === "list_config" && !isOwner
+                  ? { trackers: (await execAdminTool("list_config", {}) as any)?.trackers || [] }
+                  : await execAdminTool(tu.name, tu.input);
         } catch (e: any) {
           out = { ok: false, error: e.message };
         }
