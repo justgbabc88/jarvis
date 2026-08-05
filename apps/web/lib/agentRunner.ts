@@ -61,6 +61,28 @@ const CLIENT_TOOLS: Anthropic.Tool[] = [
     input_schema: { type: "object" as const, properties: {} },
   },
   {
+    name: "get_ad_performance",
+    description:
+      "Meta ads performance per campaign or adset: spend, leads, CPL, CTR, frequency, with ids. " +
+      "Use before proposing budget changes — the adset ids are what meta.budget_update executes against.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        level: { type: "string", enum: ["campaign", "adset"] },
+        days: { type: "number", description: "default 14, max 60" },
+      },
+    },
+  },
+  {
+    name: "get_funnel",
+    description:
+      "GoHighLevel pipeline funnel: opportunities created, open per stage with values, wins/losses.",
+    input_schema: {
+      type: "object" as const,
+      properties: { days: { type: "number", description: "default 30, max 90" } },
+    },
+  },
+  {
     name: "create_tracker",
     description:
       "Create a daily tracker — a number the owner logs every day (e.g. 'Cold outreach sent'). " +
@@ -151,6 +173,16 @@ async function execTool(name: string, input: any, ctx: RunContext): Promise<unkn
       connected: agenda.connected,
       errors: agenda.errors,
     };
+  }
+
+  if (name === "get_ad_performance") {
+    const { execGetAdPerformance } = await import("./jarvis");
+    return await execGetAdPerformance(input);
+  }
+
+  if (name === "get_funnel") {
+    const { execGetFunnel } = await import("./jarvis");
+    return await execGetFunnel(input);
   }
 
   if (name === "create_tracker") {

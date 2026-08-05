@@ -27,6 +27,14 @@ const PROVIDERS: Record<
       { key: "ad_account_id", label: "Ad account id", placeholder: "act_1234567890" },
     ],
   },
+  ghl: {
+    label: "GoHighLevel — funnel",
+    hint: "Sub-account → Settings → Private Integrations → create one with opportunities scopes. Location ID is in Settings → Business Profile.",
+    fields: [
+      { key: "api_token", label: "Private integration token", placeholder: "pit-…" },
+      { key: "location_id", label: "Location ID" },
+    ],
+  },
   clickup: {
     label: "ClickUp — tasks",
     fields: [

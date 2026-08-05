@@ -470,6 +470,115 @@ export async function getPersona(): Promise<string | null> {
   return typeof style === "string" && style.trim() ? style.trim() : null;
 }
 
+const GET_AD_PERFORMANCE_TOOL: Anthropic.Tool = {
+  name: "get_ad_performance",
+  description:
+    "Meta ads performance per campaign or per adset: spend, leads, CPL, CTR, frequency, with ids. " +
+    "Call for questions about which campaigns/adsets are working, CPL, ad fatigue, or before proposing " +
+    "budget changes (the adset ids here are what a meta.budget_update action executes against).",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      level: { type: "string", enum: ["campaign", "adset"], description: "default campaign" },
+      days: { type: "number", description: "How many days back (default 14, max 60)" },
+    },
+  },
+};
+
+export async function execGetAdPerformance(input: any): Promise<string> {
+  const { getProviderCreds } = await import("./connectors");
+  const { metaCredsFromEnv, fetchMetaCampaignInsights, insightsToText } = await import(
+    "./connectors/meta"
+  );
+  const creds = (await getProviderCreds<any>("meta")) || metaCredsFromEnv();
+  if (!creds) return "No Meta connection configured — add one in Connections.";
+  const days = Math.min(Math.max(Number(input?.days) || 14, 1), 60);
+  const level = input?.level === "adset" ? "adset" : "campaign";
+  const { nDaysAgoYmd, todayYmd } = await import("./time");
+  const range = { since: nDaysAgoYmd(days), until: todayYmd() };
+  const rows = await fetchMetaCampaignInsights(creds, range, level);
+  return insightsToText(rows, level, range);
+}
+
+const GET_FUNNEL_TOOL: Anthropic.Tool = {
+  name: "get_funnel",
+  description:
+    "GoHighLevel pipeline funnel: opportunities created, open per stage with dollar values, wins and " +
+    "losses in the range. Call for questions about leads, pipeline, booked/closed deals, or conversion.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      days: { type: "number", description: "How many days back (default 30, max 90)" },
+    },
+  },
+};
+
+export async function execGetFunnel(input: any): Promise<string> {
+  const { getProviderCreds } = await import("./connectors");
+  const { fetchGhlFunnel, funnelToText } = await import("./connectors/ghl");
+  const creds = await getProviderCreds<any>("ghl");
+  if (!creds) return "No GoHighLevel connection configured — add one in Connections.";
+  const days = Math.min(Math.max(Number(input?.days) || 30, 7), 90);
+  const { nDaysAgoYmd, todayYmd } = await import("./time");
+  const range = { since: nDaysAgoYmd(days), until: todayYmd() };
+  const funnel = await fetchGhlFunnel(creds, range);
+  return funnelToText(funnel, range);
+}
+
+const QUEUE_ACTION_TOOL: Anthropic.Tool = {
+  name: "queue_action",
+  description:
+    "Queue an action for the owner's approval — it does NOT execute until they tap Approve (in the app " +
+    "or the Slack card). Use when the owner asks you to stage a money/send action, e.g. a Meta budget " +
+    "change after reviewing get_ad_performance. Executable payloads:\n" +
+    '  Meta budget: { "action": "meta.budget_update", "object_type": "adset"|"campaign", "object_id": "123", "daily_budget_cents": 5000 }\n' +
+    '  email:       { "action": "email.send", "to": "a@b.com", "subject": "...", "body": "full text" }\n' +
+    "Always state clearly in your reply that it is QUEUED, not done.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      kind: { type: "string", enum: ["send", "post", "delete", "spend", "other"] },
+      title: { type: "string", description: "One-line description shown to the owner" },
+      detail: { type: "string", description: "Why — cite the numbers that justify it" },
+      amount_cents: { type: "number" },
+      payload: { type: "object", description: "Machine-executable details (runs as-is on approval)" },
+    },
+    required: ["kind", "title", "payload"],
+  },
+};
+
+async function execQueueAction(input: any): Promise<unknown> {
+  const db = supabaseAdmin();
+  const kind = ["send", "post", "delete", "spend", "other"].includes(input.kind) ? input.kind : "other";
+  const { data, error } = await db
+    .from("approvals")
+    .insert({
+      kind,
+      title: String(input.title || "Untitled action").slice(0, 300),
+      detail: input.detail ? String(input.detail) : null,
+      amount_cents: typeof input.amount_cents === "number" ? Math.round(input.amount_cents) : null,
+      payload: input.payload && typeof input.payload === "object" ? input.payload : {},
+      status: "pending",
+    })
+    .select("id")
+    .single();
+  if (error) return { ok: false, error: error.message };
+
+  const { notifySlackApproval } = await import("./notify");
+  await notifySlackApproval({
+    id: data.id,
+    kind,
+    title: String(input.title || "Untitled action"),
+    detail: input.detail ? String(input.detail) : null,
+    amount_cents: typeof input.amount_cents === "number" ? Math.round(input.amount_cents) : null,
+  });
+  return {
+    ok: true,
+    approval_id: data.id,
+    note: "Queued — an approval card was posted. It runs ONLY if the owner approves.",
+  };
+}
+
 const GET_HISTORY_TOOL: Anthropic.Tool = {
   name: "get_history",
   description:
@@ -643,6 +752,7 @@ const ADMIN_RULES = [
   "If a channel prompt is set up, remind the owner to /invite the bot to that channel once.",
   "Call list_config first to find the right id; confirm what you changed in your reply.",
   "You can mark the owner's ClickUp tasks complete: list_tasks → complete_task. Completing is reversible; confirm which task you closed.",
+  "For ad/funnel analysis use get_ad_performance (Meta campaigns/adsets: spend, CPL, CTR) and get_funnel (GHL pipeline stages, wins). When the owner asks to change a budget or stage a money/send action, use queue_action — it only QUEUES an approval card; nothing executes until the owner taps Approve. Cite the numbers that justify any queued action.",
   "You can NOT delete anything, edit credentials, send, post, or spend from chat — for those, point the user to the Jarvis app (deletes/credentials) or remind them that agents queue such actions for approval.",
 ].join(" ");
 
@@ -698,6 +808,9 @@ export async function answerQuestion(
     ? [
         ...ADMIN_TOOLS,
         GET_HISTORY_TOOL,
+        GET_AD_PERFORMANCE_TOOL,
+        GET_FUNNEL_TOOL,
+        QUEUE_ACTION_TOOL,
         SET_PERSONA_TOOL,
         SET_NAME_TOOL,
         FIND_USER_TOOL,
@@ -762,6 +875,18 @@ export async function answerQuestion(
               : tu.name === "get_history"
                 ? isOwner
                   ? await execGetHistory(tu.input)
+                  : { ok: false, error: "owner only" }
+              : tu.name === "get_ad_performance"
+                ? isOwner
+                  ? await execGetAdPerformance(tu.input)
+                  : { ok: false, error: "owner only" }
+              : tu.name === "get_funnel"
+                ? isOwner
+                  ? await execGetFunnel(tu.input)
+                  : { ok: false, error: "owner only" }
+              : tu.name === "queue_action"
+                ? isOwner
+                  ? await execQueueAction(tu.input)
                   : { ok: false, error: "owner only" }
               : tu.name === "find_slack_user"
                 ? isOwner

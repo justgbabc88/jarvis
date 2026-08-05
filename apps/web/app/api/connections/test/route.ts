@@ -5,6 +5,7 @@ import { clickupWhoAmI, fetchClickUpTodayTasks } from "@/lib/connectors/clickup"
 import { fetchCalendarToday } from "@/lib/connectors/gcal";
 import { verifyEmail } from "@/lib/connectors/email";
 import { verifySlack } from "@/lib/connectors/slack";
+import { fetchGhlPipelines } from "@/lib/connectors/ghl";
 import { nDaysAgoYmd, todayYmd } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
@@ -46,6 +47,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         ok: true,
         message: `Connected. ${events.length} event(s) on today's calendar.`,
+      });
+    }
+    if (provider === "ghl") {
+      const pipelines = await fetchGhlPipelines(credentials);
+      return NextResponse.json({
+        ok: true,
+        message: `Connected. Found ${pipelines.length} pipeline${pipelines.length === 1 ? "" : "s"}: ${pipelines
+          .map((p) => p.name)
+          .join(", ")
+          .slice(0, 120)}.`,
       });
     }
     if (provider === "email") {

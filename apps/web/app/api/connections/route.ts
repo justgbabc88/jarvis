@@ -17,7 +17,7 @@ export async function GET() {
 }
 
 const CreateSchema = z.object({
-  provider: z.enum(["nmi", "meta", "email", "slack", "google_calendar", "clickup", "mcp"]),
+  provider: z.enum(["nmi", "meta", "ghl", "email", "slack", "google_calendar", "clickup", "mcp"]),
   label: z.string().min(1),
   credentials: z.record(z.any()).default({}),
   config: z.record(z.any()).default({}),

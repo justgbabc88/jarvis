@@ -70,7 +70,11 @@ In the app:
   Meta ad account id per business.
 - **Connections** →
   - **NMI** (security key) — revenue
-  - **Meta** (access token + ad account id) — ad spend, and approved budget changes
+  - **Meta** (access token + ad account id) — ad spend, per-campaign/adset
+    performance (CPL, CTR, frequency), and approved budget changes
+  - **GoHighLevel** (private integration token + location id) — the funnel:
+    opportunities per pipeline stage, values, wins. Sub-account → Settings →
+    Private Integrations (needs opportunities scopes)
   - **Email (SMTP)** — lets approved emails actually send (Gmail: `smtp.gmail.com`,
     port 587, your address + an [app password](https://myaccount.google.com/apppasswords))
   - **Slack** (incoming webhook URL; optional bot token + signing secret) —
