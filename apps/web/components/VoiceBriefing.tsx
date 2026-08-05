@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
  * You ask for an update out loud (or type), Jarvis answers, and the
  * browser reads the answer back.
  */
-export default function VoiceBriefing() {
+export default function VoiceBriefing({ assistantName = "Jarvis" }: { assistantName?: string }) {
   const [listening, setListening] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [speaking, setSpeaking] = useState(false);
@@ -140,7 +140,7 @@ export default function VoiceBriefing() {
         <div className={`orb ${orbState}`} aria-hidden />
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between">
-            <div className="card-title">Ask Jarvis</div>
+            <div className="card-title">Ask {assistantName}</div>
             <div className="pill">
               {speaking ? (
                 <>

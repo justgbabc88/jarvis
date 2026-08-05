@@ -9,6 +9,7 @@ import {
 import { getTodayAgenda } from "@/lib/agenda";
 import { relativeDay } from "@/lib/format";
 import VoiceBriefing from "@/components/VoiceBriefing";
+import { getAssistantIdentity } from "@/lib/identity";
 import TrackersCard from "@/components/TrackersCard";
 import BusinessCardView from "@/components/BusinessCardView";
 import SyncButton from "@/components/SyncButton";
@@ -40,7 +41,7 @@ export default async function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <VoiceBriefing />
+      <VoiceBriefing assistantName={(await getAssistantIdentity()).name} />
 
       {approvals.length > 0 && (
         <Link

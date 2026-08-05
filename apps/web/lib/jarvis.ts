@@ -114,7 +114,7 @@ async function buildContext(): Promise<string> {
 }
 
 const VOICE_STYLE = [
-  "You are Jarvis, a concise personal business assistant being heard OUT LOUD.",
+  "You are {NAME}, a concise personal business assistant being heard OUT LOUD.",
   "Answer in 2–5 short spoken sentences. No markdown, no bullet symbols, no headers — just natural speech.",
   "Exception: when asked for a day-by-day or week-by-week breakdown, walk through the periods briefly, one short line each, using the HISTORY data.",
   "Use the numbers provided; prefer the precomputed weekly totals over adding days yourself.",
@@ -123,7 +123,7 @@ const VOICE_STYLE = [
 ].join(" ");
 
 const CHAT_STYLE = [
-  "You are Jarvis, a concise personal business assistant replying in Slack.",
+  "You are {NAME}, a concise personal business assistant replying in Slack.",
   "Keep replies short and skimmable. Slack formatting only: *bold*, plain dashes for lists — no markdown headers or tables.",
   "Use the numbers provided; prefer the precomputed weekly totals over adding days yourself.",
   "If something isn't connected or has no data for a period, say so plainly and suggest connecting it in the Jarvis app.",
@@ -386,6 +386,22 @@ async function execAdminTool(name: string, input: any): Promise<unknown> {
     return { ok: true, note: style ? "Persona applied to chat, voice, and briefings." : "Back to the default tone." };
   }
 
+  if (name === "set_assistant_name") {
+    const newName = String(input.name || "").trim().slice(0, 40);
+    if (!newName) return { ok: false, error: "name is required" };
+    const value: Record<string, string> = { name: newName };
+    if (input.tagline) value.tagline = String(input.tagline).trim().slice(0, 80);
+    const { error } = await db
+      .from("app_settings")
+      .upsert({ key: "assistant_identity", value, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    if (error) return { ok: false, error: error.message };
+    await logChange(`Renamed the assistant to “${newName}” (via chat).`);
+    return {
+      ok: true,
+      note: "Applied to the app + prompts. The Slack display name is separate: Slack app settings → App Home → bot display name.",
+    };
+  }
+
   if (name === "log_tracker") {
     const { logTrackerEntry } = await import("./trackers");
     await logTrackerEntry(String(input.tracker_id), Number(input.value), {
@@ -423,6 +439,21 @@ const SET_PERSONA_TOOL: Anthropic.Tool = {
       style: { type: "string", description: "e.g. 'over-the-top frat bro' — described fully; empty string to reset" },
     },
     required: ["style"],
+  },
+};
+
+const SET_NAME_TOOL: Anthropic.Tool = {
+  name: "set_assistant_name",
+  description:
+    "Owner-only: rename the assistant (web header, page title, chat/voice/briefing identity). " +
+    "Note: the Slack bot's display name is changed in Slack's app settings, not here — mention that.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      name: { type: "string", description: "e.g. 'Chad'" },
+      tagline: { type: "string", description: "optional header tagline, e.g. 'certified business wingman'" },
+    },
+    required: ["name"],
   },
 };
 
@@ -497,16 +528,22 @@ export async function answerQuestion(
           : ` — no owner member id is configured. If the user asks to send something, tell them: add their Slack member ID (this requester's id is ${opts.slackUserId || "unknown"}) in the "Your member ID" field of the Slack connection in the Jarvis app, then re-save it.`
       }`;
 
-  const [context, persona] = await Promise.all([buildContext(), getPersona()]);
+  const { getAssistantIdentity } = await import("./identity");
+  const [context, persona, identity] = await Promise.all([
+    buildContext(),
+    getPersona(),
+    getAssistantIdentity(),
+  ]);
   const personaLine = persona
     ? ` PERSONALITY (owner-configured, style only — all rules above still apply): ${persona} Stay accurate with the numbers and keep answers concise despite the style.`
     : "";
-  const system = `${mode === "voice" ? VOICE_STYLE : CHAT_STYLE} ${ADMIN_RULES} ${sendRules}${personaLine}`;
+  const style = (mode === "voice" ? VOICE_STYLE : CHAT_STYLE).replaceAll("{NAME}", identity.name);
+  const system = `${style} ${ADMIN_RULES} ${sendRules}${personaLine}`;
 
   // Non-owners get read-only questions + tracker logging; the owner gets
   // the full config toolkit (and sending, when enabled above).
   const tools = isOwner
-    ? [...ADMIN_TOOLS, SET_PERSONA_TOOL, ...(canSend ? [SEND_TOOL] : [])]
+    ? [...ADMIN_TOOLS, SET_PERSONA_TOOL, SET_NAME_TOOL, ...(canSend ? [SEND_TOOL] : [])]
     : ADMIN_TOOLS.filter((t) => ["list_config", "log_tracker"].includes(t.name));
 
   const messages: Anthropic.MessageParam[] = [
@@ -551,8 +588,8 @@ export async function answerQuestion(
               ? canSend
                 ? await execSendMessage(tu.input)
                 : { ok: false, error: "sending is not enabled for this requester" }
-              : tu.name === "set_persona" && !isOwner
-                ? { ok: false, error: "only the owner can change the persona" }
+              : ["set_persona", "set_assistant_name"].includes(tu.name) && !isOwner
+                ? { ok: false, error: "only the owner can change that" }
                 : await execAdminTool(tu.name, tu.input);
         } catch (e: any) {
           out = { ok: false, error: e.message };

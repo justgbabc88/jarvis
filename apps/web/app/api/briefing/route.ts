@@ -83,9 +83,10 @@ export async function POST(req: NextRequest) {
   ].join("\n\n");
 
   const { getPersona } = await import("@/lib/jarvis");
-  const persona = await getPersona();
+  const { getAssistantIdentity } = await import("@/lib/identity");
+  const [persona, identity] = await Promise.all([getPersona(), getAssistantIdentity()]);
   const system = [
-    "You are Jarvis delivering the owner's MORNING BRIEFING, read out loud by the browser.",
+    `You are ${identity.name} delivering the owner's MORNING BRIEFING, read out loud by the browser.`,
     "Write 5–9 short spoken sentences, natural speech only — no markdown, bullets, or headers.",
     "Open with a one-line greeting, then: how the businesses are doing (key numbers, rounded to whole dollars),",
     "today's calendar and most important tasks, anything waiting for approval, and one concrete suggestion for the day.",

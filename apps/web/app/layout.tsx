@@ -1,11 +1,15 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { getAssistantIdentity } from "@/lib/identity";
 
-export const metadata: Metadata = {
-  title: "Jarvis",
-  description: "A single snapshot of your businesses — and agents that do the work.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const id = await getAssistantIdentity();
+  return {
+    title: id.name,
+    description: "A single snapshot of your businesses — and agents that do the work.",
+  };
+}
 
 const nav = [
   { href: "/", label: "Snapshot" },
@@ -16,7 +20,8 @@ const nav = [
   { href: "/settings", label: "Settings" },
 ];
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const id = await getAssistantIdentity();
   return (
     <html lang="en">
       <head>
@@ -32,14 +37,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <header className="mb-8 flex items-center justify-between border-b border-line/70 pb-4">
             <Link href="/" className="flex items-center gap-3">
               <span className="reactor">
-                <span className="reactor-core">J</span>
+                <span className="reactor-core">{id.name.charAt(0).toUpperCase()}</span>
               </span>
               <div>
                 <div className="font-display text-lg font-bold tracking-[0.28em] text-white">
-                  JARVIS
+                  {id.name.toUpperCase()}
                 </div>
                 <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-accent/70">
-                  just a rather very intelligent system
+                  {id.tagline}
                 </div>
               </div>
             </Link>
