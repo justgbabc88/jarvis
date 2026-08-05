@@ -1,4 +1,6 @@
-import { ask, anthropicConfigured } from "./anthropic";
+import Anthropic from "@anthropic-ai/sdk";
+import { anthropic, defaultModel, anthropicConfigured } from "./anthropic";
+import { supabaseAdmin } from "./supabase";
 import {
   getBusinessCards,
   getYesterdayActivity,
@@ -128,20 +130,216 @@ const CHAT_STYLE = [
   "Round money to whole dollars. Be direct and useful, not chatty.",
 ].join(" ");
 
+// ── Safe admin tools ─────────────────────────────────────────
+// Conversational Jarvis can reconfigure the app — rename things, add
+// businesses/trackers, log tracker values. Deliberately excluded:
+// deleting anything, touching credentials, and anything that sends,
+// posts, or spends (that stays behind the approval gate).
+const ADMIN_TOOLS: Anthropic.Tool[] = [
+  {
+    name: "list_config",
+    description:
+      "Current app configuration: businesses, connections (labels only, never credentials), and trackers with ids. Call before renaming so you use the right id.",
+    input_schema: { type: "object" as const, properties: {} },
+  },
+  {
+    name: "rename_connection",
+    description: "Change a connection's display label (credentials are untouched).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        connection_id: { type: "string" },
+        new_label: { type: "string" },
+      },
+      required: ["connection_id", "new_label"],
+    },
+  },
+  {
+    name: "rename_business",
+    description: "Rename a business.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        business_id: { type: "string" },
+        new_name: { type: "string" },
+      },
+      required: ["business_id", "new_name"],
+    },
+  },
+  {
+    name: "create_business",
+    description: "Add a new business to the dashboard.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        name: { type: "string" },
+        description: { type: "string" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "create_tracker",
+    description: "Create a daily tracker (daily Slack prompt + dashboard totals).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        name: { type: "string" },
+        question: { type: "string" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "log_tracker",
+    description: "Log today's value for a tracker (e.g. the user says 'log 40 cold outreach').",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        tracker_id: { type: "string", description: "From list_config" },
+        value: { type: "number" },
+        date: { type: "string", description: "YYYY-MM-DD, default today" },
+      },
+      required: ["tracker_id", "value"],
+    },
+  },
+];
+
+async function execAdminTool(name: string, input: any): Promise<unknown> {
+  const db = supabaseAdmin();
+  const logChange = (summary: string) =>
+    db.from("activity_log").insert({ type: "config", summary, meta: { via: "chat" } });
+
+  if (name === "list_config") {
+    const [{ data: businesses }, { data: connections }] = await Promise.all([
+      db.from("businesses").select("id, name, is_active").order("created_at"),
+      db.from("connections").select("id, provider, label, status").order("created_at"),
+    ]);
+    const { listTrackersWithStats } = await import("./trackers");
+    const trackers = await listTrackersWithStats(true).catch(() => []);
+    return { businesses, connections, trackers };
+  }
+
+  if (name === "rename_connection") {
+    const { data, error } = await db
+      .from("connections")
+      .update({ label: String(input.new_label).slice(0, 120) })
+      .eq("id", String(input.connection_id))
+      .select("label")
+      .single();
+    if (error) return { ok: false, error: error.message };
+    await logChange(`Renamed a connection to “${data.label}” (via chat).`);
+    return { ok: true, label: data.label };
+  }
+
+  if (name === "rename_business") {
+    const { data, error } = await db
+      .from("businesses")
+      .update({ name: String(input.new_name).slice(0, 120) })
+      .eq("id", String(input.business_id))
+      .select("name")
+      .single();
+    if (error) return { ok: false, error: error.message };
+    await logChange(`Renamed a business to “${data.name}” (via chat).`);
+    return { ok: true, name: data.name };
+  }
+
+  if (name === "create_business") {
+    const { data, error } = await db
+      .from("businesses")
+      .insert({ name: String(input.name).slice(0, 120), description: input.description || null })
+      .select("id, name")
+      .single();
+    if (error) return { ok: false, error: error.message };
+    await logChange(`Added business “${data.name}” (via chat).`);
+    return { ok: true, id: data.id, name: data.name };
+  }
+
+  if (name === "create_tracker") {
+    const { createTracker } = await import("./trackers");
+    const t = await createTracker({
+      name: String(input.name),
+      question: input.question ? String(input.question) : undefined,
+    });
+    return { ok: true, tracker_id: t.id, name: t.name };
+  }
+
+  if (name === "log_tracker") {
+    const { logTrackerEntry } = await import("./trackers");
+    await logTrackerEntry(String(input.tracker_id), Number(input.value), {
+      date: input.date ? String(input.date) : undefined,
+    });
+    await logChange(`Logged ${input.value} on a tracker (via chat).`);
+    return { ok: true };
+  }
+
+  return { ok: false, error: `unknown tool: ${name}` };
+}
+
+const ADMIN_RULES = [
+  "You can make configuration changes with your tools when the user asks: rename businesses/connections, add businesses, create trackers, log tracker values.",
+  "Call list_config first to find the right id; confirm what you changed in your reply.",
+  "You can NOT delete anything, edit credentials, send, post, or spend from chat — for those, point the user to the Jarvis app (deletes/credentials) or remind them that agents queue such actions for approval.",
+].join(" ");
+
 /** Answer a question with full business context. mode: spoken vs Slack chat. */
 export async function answerQuestion(q: string, mode: "voice" | "chat"): Promise<string> {
   if (!anthropicConfigured()) {
     return "I'm not connected to Claude yet — add your ANTHROPIC_API_KEY and ask me again.";
   }
   const context = await buildContext();
-  try {
-    return await ask({
-      system: mode === "voice" ? VOICE_STYLE : CHAT_STYLE,
-      prompt: `Here is the current snapshot:\n\n${context}\n\nThe user asked: "${q}"\n\n${
+  const system = `${mode === "voice" ? VOICE_STYLE : CHAT_STYLE} ${ADMIN_RULES}`;
+
+  const messages: Anthropic.MessageParam[] = [
+    {
+      role: "user",
+      content: `Here is the current snapshot:\n\n${context}\n\nThe user asked: "${q}"\n\n${
         mode === "voice" ? "Answer for spoken delivery." : "Answer for Slack."
       }`,
-      maxTokens: 500,
-    });
+    },
+  ];
+
+  try {
+    for (let turn = 0; turn < 5; turn++) {
+      const res = await anthropic().messages.create({
+        model: defaultModel(),
+        max_tokens: 800,
+        system,
+        tools: ADMIN_TOOLS,
+        messages,
+      });
+      messages.push({ role: "assistant", content: res.content });
+
+      const toolUses = res.content.filter(
+        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
+      );
+      if (res.stop_reason !== "tool_use" || toolUses.length === 0) {
+        return (
+          res.content
+            .filter((b): b is Anthropic.TextBlock => b.type === "text")
+            .map((b) => b.text)
+            .join("\n")
+            .trim() || "(no answer)"
+        );
+      }
+
+      const results: Anthropic.ToolResultBlockParam[] = [];
+      for (const tu of toolUses) {
+        let out: unknown;
+        try {
+          out = await execAdminTool(tu.name, tu.input);
+        } catch (e: any) {
+          out = { ok: false, error: e.message };
+        }
+        results.push({
+          type: "tool_result",
+          tool_use_id: tu.id,
+          content: JSON.stringify(out).slice(0, 4000),
+        });
+      }
+      messages.push({ role: "user", content: results });
+    }
+    return "I ran out of steps before finishing — the changes so far are saved; ask me to continue.";
   } catch (e: any) {
     return `I hit an error reaching Claude: ${e.message}`;
   }
