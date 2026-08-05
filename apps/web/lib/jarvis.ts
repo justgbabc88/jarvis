@@ -239,8 +239,15 @@ const ADMIN_TOOLS: Anthropic.Tool[] = [
         on_submit_message: {
           type: "string",
           description:
-            "Owner-authored template posted to the channel whenever the form is submitted (e.g. praise). " +
-            "Placeholders: {mention} {name} {total}. This is owner-configured automation, allowed from chat.",
+            "Owner-authored FIXED template posted whenever the form is submitted. " +
+            "Placeholders: {mention} {name} {total}. Owner-configured automation, allowed from chat.",
+        },
+        on_submit_prompt: {
+          type: "string",
+          description:
+            "Instead of a fixed template: guidance for a FRESH AI-written message on every submission — varied " +
+            "daily, in persona, referencing the day's numbers (e.g. 'praise Dwight for the day's outreach, keep it " +
+            "different every day'). Prefer this when the owner wants non-repetitive messages.",
         },
       },
       required: ["tracker_id"],
@@ -316,9 +323,10 @@ async function execAdminTool(name: string, input: any): Promise<unknown> {
 
     // Resolve "#general" / "Dwight" to Slack ids when delivery is requested.
     let slack: Record<string, string> | undefined;
-    if (input.slack_channel || input.prompt_time || input.mention || input.on_submit_message) {
+    if (input.slack_channel || input.prompt_time || input.mention || input.on_submit_message || input.on_submit_prompt) {
       slack = {};
       if (input.on_submit_message) slack.on_submit_message = String(input.on_submit_message).slice(0, 500);
+      if (input.on_submit_prompt) slack.on_submit_prompt = String(input.on_submit_prompt).slice(0, 500);
       if (input.prompt_time) {
         const m = /^(\d{1,2}):(\d{2})$/.exec(String(input.prompt_time));
         if (!m) return { ok: false, error: "prompt_time must be HH:MM (24h)" };

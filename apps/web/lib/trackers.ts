@@ -23,6 +23,11 @@ export type TrackerSlack = {
   // Owner-authored template posted to the channel when the form is
   // submitted. Placeholders: {mention} {name} {total}
   on_submit_message?: string;
+  // OR: owner guidance for a FRESH AI-written message on each submission
+  // (varied daily, persona-aware, references the day's numbers).
+  on_submit_prompt?: string;
+  // Last few generated messages, kept so each new one avoids repeating.
+  recent_praise?: string[];
 };
 
 export type TrackerWithStats = {
