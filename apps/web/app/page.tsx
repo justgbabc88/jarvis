@@ -76,7 +76,7 @@ export default async function Dashboard() {
         <div className="card">
           <h2 className="font-semibold">No businesses yet</h2>
           <p className="mt-1 text-muted">
-            Businesses are a setting, not code. Add Londen Leads, Lenne, or anything else —
+            Businesses are a setting, not code. Add Londen Leads, Quantum Sync, or anything else —
             and remove them anytime.
           </p>
           <Link href="/settings" className="btn btn-primary mt-3">

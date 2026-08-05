@@ -83,7 +83,7 @@ export default function GoalsPage() {
       <form onSubmit={add} className="card grid gap-3 sm:grid-cols-2">
         <div className="sm:col-span-2">
           <label className="mb-1 block text-sm text-muted">Goal</label>
-          <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Get Lenne to $50k/mo revenue" />
+          <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Get Quantum Sync to $50k/mo revenue" />
         </div>
         <div className="sm:col-span-2">
           <label className="mb-1 block text-sm text-muted">Details (optional)</label>

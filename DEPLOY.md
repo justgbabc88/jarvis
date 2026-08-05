@@ -66,7 +66,7 @@ The worker calls back into the web app with `CRON_SECRET` on a schedule:
 ## 4. Connect your data
 
 In the app:
-- **Settings** → add your businesses (e.g. Londen Leads, Lenne). Optionally set a
+- **Settings** → add your businesses (e.g. Londen Leads, Quantum Sync). Optionally set a
   Meta ad account id per business.
 - **Connections** →
   - **NMI** (security key) — revenue

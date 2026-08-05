@@ -182,7 +182,7 @@ export default function VoiceBriefing({ assistantName = "Jarvis" }: { assistantN
                 if (input.value.trim()) ask(input.value.trim());
               }}
             >
-              <input name="q" className="input" placeholder="…or type: How's Lenne doing this month?" />
+              <input name="q" className="input" placeholder="…or type: How's Quantum Sync doing this month?" />
             </form>
           </div>
 
