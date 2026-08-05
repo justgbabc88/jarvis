@@ -62,14 +62,19 @@ export async function postSlackChannel(
 }
 
 /** Who is the bot? Used by the Test button and to ignore our own messages. */
-export async function slackAuthTest(creds: SlackCreds): Promise<{ user: string; team: string; user_id: string }> {
+export async function slackAuthTest(
+  creds: SlackCreds
+): Promise<{ user: string; team: string; user_id: string; scopes: string[] }> {
   const res = await fetch("https://slack.com/api/auth.test", {
     method: "POST",
     headers: { Authorization: `Bearer ${creds.bot_token}` },
   });
   const json: any = await res.json().catch(() => ({}));
   if (!json.ok) throw new Error(`bot token check failed: ${json.error || res.status}`);
-  return { user: json.user, team: json.team, user_id: json.user_id };
+  // Slack reports the token's ACTUAL granted scopes in this header —
+  // the source of truth, regardless of what the app config page shows.
+  const scopes = (res.headers.get("x-oauth-scopes") || "").split(",").map((s) => s.trim()).filter(Boolean);
+  return { user: json.user, team: json.team, user_id: json.user_id, scopes };
 }
 
 /**
@@ -112,20 +117,34 @@ async function slackApi(creds: SlackCreds, method: string, params: Record<string
 export async function resolveSlackChannel(creds: SlackCreds, name: string): Promise<{ id: string; name: string }> {
   const wanted = name.replace(/^#/, "").toLowerCase();
   if (/^C[A-Z0-9]{6,}$/i.test(name)) return { id: name, name };
-  let cursor = "";
-  for (let i = 0; i < 10; i++) {
-    const j = await slackApi(creds, "conversations.list", {
-      types: "public_channel,private_channel",
-      limit: "200",
-      exclude_archived: "true",
-      ...(cursor ? { cursor } : {}),
-    });
-    const hit = (j.channels || []).find((c: any) => c.name?.toLowerCase() === wanted);
-    if (hit) return { id: hit.id, name: hit.name };
-    cursor = j.response_metadata?.next_cursor || "";
-    if (!cursor) break;
+
+  // Public channels first (channels:read). Asking for private channels in
+  // the same call requires groups:read and makes Slack reject the WHOLE
+  // request with missing_scope — so try them separately, best-effort.
+  for (const types of ["public_channel", "private_channel"]) {
+    let cursor = "";
+    try {
+      for (let i = 0; i < 10; i++) {
+        const j = await slackApi(creds, "conversations.list", {
+          types,
+          limit: "200",
+          exclude_archived: "true",
+          ...(cursor ? { cursor } : {}),
+        });
+        const hit = (j.channels || []).find((c: any) => c.name?.toLowerCase() === wanted);
+        if (hit) return { id: hit.id, name: hit.name };
+        cursor = j.response_metadata?.next_cursor || "";
+        if (!cursor) break;
+      }
+    } catch (e: any) {
+      // groups:read not granted → skip private channels silently.
+      if (types === "public_channel") throw e;
+    }
   }
-  throw new Error(`channel "${name}" not found (is the app missing the channels:read scope?)`);
+  throw new Error(
+    `channel "${name}" not found among channels the bot can see. If it's a private channel, ` +
+      `add the groups:read scope and /invite the bot; if public, check the exact name.`
+  );
 }
 
 /** "Dwight" → member id for an <@U…> mention. Needs the users:read scope. */
@@ -160,6 +179,13 @@ export async function verifySlack(creds: SlackCreds): Promise<string> {
   if (creds.bot_token) {
     const who = await slackAuthTest(creds);
     parts.push(`bot @${who.user} authenticated in ${who.team}`);
+    const want = ["chat:write", "im:history", "app_mentions:read", "channels:read", "users:read"];
+    const missing = want.filter((s) => !who.scopes.includes(s));
+    parts.push(
+      missing.length
+        ? `⚠ token is missing scopes: ${missing.join(", ")} — reinstall the Slack app, then re-save this connection`
+        : "all scopes granted ✓"
+    );
   }
   if (parts.length === 0) throw new Error("add a webhook URL (and optionally a bot token)");
   if (creds.bot_token && !creds.signing_secret) {
