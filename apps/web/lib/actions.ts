@@ -107,13 +107,16 @@ async function execMetaBudgetUpdate(payload: any): Promise<ExecutionResult> {
  * execution_status / execution_result on the row and logs to the
  * activity feed. Never throws.
  */
-export async function executeApproval(approval: {
-  id: string;
-  title: string;
-  payload: any;
-  agent_id?: string | null;
-  agent_run_id?: string | null;
-}): Promise<ExecutionResult> {
+export async function executeApproval(
+  approval: {
+    id: string;
+    title: string;
+    payload: any;
+    agent_id?: string | null;
+    agent_run_id?: string | null;
+  },
+  opts: { notify?: boolean } = {}
+): Promise<ExecutionResult> {
   const action = String(approval.payload?.action || "");
   let result: ExecutionResult;
 
@@ -144,8 +147,9 @@ export async function executeApproval(approval: {
     .eq("id", approval.id);
 
   // Tell the owner in Slack what actually happened (skip slack.post — the
-  // posted message itself is already visible in the channel).
-  if (action !== "slack.post") {
+  // posted message itself is already visible in the channel — and skip
+  // when the caller reports the outcome itself, e.g. the Slack buttons).
+  if (opts.notify !== false && action !== "slack.post") {
     const { notifySlack } = await import("./notify");
     await notifySlack(
       result.status === "executed"

@@ -5,7 +5,9 @@ import { SESSION_COOKIE, isValidSession } from "./lib/auth";
  * Gate the whole app behind the session cookie, except the login page,
  * the login API, and static assets.
  */
-const PUBLIC_PATHS = ["/login", "/api/login", "/favicon.ico"];
+// /api/slack/* is called by Slack's servers and authenticates with the
+// Slack signing secret inside the route, not the session cookie.
+const PUBLIC_PATHS = ["/login", "/api/login", "/api/slack", "/favicon.ico"];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

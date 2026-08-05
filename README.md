@@ -35,9 +35,11 @@ no Retell, no paid service.
 - **Daily briefing** — the worker auto-generates a spoken-style morning briefing
   (default 7am, your timezone); one tap on the dashboard reads it aloud, free —
   and it posts to **Slack** too, if connected.
-- **Slack** — one webhook URL connects a channel: briefing, agent reports, and
-  approval alerts post there, and agents can draft `slack.post` messages that go
-  out when you approve them.
+- **Slack, two-way** — briefing, agent reports, and tracker prompts post to your
+  channel; queued actions arrive as cards with **Approve & run / Reject** buttons
+  (identical to deciding in the app, execution included); and you can **DM the
+  Jarvis bot questions** — it answers from live revenue, history, calendar, and
+  tasks. Agents can also draft `slack.post` messages that go out on approval.
 - **Daily trackers** — "create a cold outreach tracker" and Jarvis asks for the
   number in Slack every morning and totals it (today / 7d / all-time) on the
   dashboard. Agents can create trackers from plain English.

@@ -73,14 +73,66 @@ In the app:
   - **Meta** (access token + ad account id) — ad spend, and approved budget changes
   - **Email (SMTP)** — lets approved emails actually send (Gmail: `smtp.gmail.com`,
     port 587, your address + an [app password](https://myaccount.google.com/apppasswords))
-  - **Slack** (incoming webhook URL) — daily briefing, tracker prompts, agent
-    reports, and approval alerts post to your channel; also powers the approved
-    `slack.post` action. api.slack.com/apps → create app → Incoming Webhooks.
+  - **Slack** (incoming webhook URL; optional bot token + signing secret) —
+    see the **Slack** section below for full two-way setup.
   - **Google Calendar** — Settings → your calendar → "Secret address in iCal
     format" → paste the URL
   - **ClickUp** — Settings → Apps → API token (optionally pick one list)
 
   Use **Test** to confirm each before saving, then **Sync now** on the dashboard.
+
+## Slack
+
+One Slack app powers everything. Create it at api.slack.com/apps →
+**Create New App → From a manifest** → pick your workspace → paste (swap in
+your Vercel domain):
+
+```yaml
+display_information:
+  name: Jarvis
+features:
+  bot_user:
+    display_name: jarvis
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - im:history
+      - app_mentions:read
+      - incoming-webhook
+settings:
+  event_subscriptions:
+    request_url: https://YOUR-APP.vercel.app/api/slack/events
+    bot_events:
+      - message.im
+      - app_mention
+  interactivity:
+    is_enabled: true
+    request_url: https://YOUR-APP.vercel.app/api/slack/interactive
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+```
+
+Then, in this order (the app must be deployed first — Slack pings the
+event URL to verify it):
+
+1. **Install to Workspace** (OAuth & Permissions) — pick the channel for the
+   incoming webhook. Copy the **webhook URL** and the **bot token** (`xoxb-…`).
+2. **Basic Information** → copy the **signing secret**.
+3. In Jarvis → **Connections → Slack**: paste all three, hit **Test**, save.
+4. Back in Slack app settings → **Event Subscriptions** → hit **Retry** on the
+   request URL so it verifies (it needs step 3's signing secret saved first).
+
+What you get:
+- **Notifications** (webhook): morning briefing, tracker prompts, agent-run
+  reports, execution results.
+- **Approval cards** (webhook + signing secret): every queued action posts
+  with **Approve & run / Reject** buttons — deciding in Slack is identical
+  to deciding in the app, including immediate execution.
+- **Conversations** (bot token + signing secret): DM the Jarvis bot (or
+  @mention it in a channel it's in) and it answers with live revenue/spend,
+  history, calendar, and task context — the same brain as browser voice.
 
 ## Daily trackers
 

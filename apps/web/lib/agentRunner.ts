@@ -187,6 +187,17 @@ async function execTool(name: string, input: any, ctx: RunContext): Promise<unkn
       .single();
     if (error) return { ok: false, error: error.message };
     ctx.approvalsQueued++;
+
+    // Put an Approve/Reject card in Slack right away (best-effort).
+    const { notifySlackApproval } = await import("./notify");
+    await notifySlackApproval({
+      id: data.id,
+      kind,
+      title: String(input.title || "Untitled action"),
+      detail: input.detail ? String(input.detail) : null,
+      amount_cents: typeof input.amount_cents === "number" ? Math.round(input.amount_cents) : null,
+    });
+
     return {
       ok: true,
       approval_id: data.id,

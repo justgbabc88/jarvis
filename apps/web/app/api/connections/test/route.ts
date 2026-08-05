@@ -58,11 +58,8 @@ export async function POST(req: NextRequest) {
       });
     }
     if (provider === "slack") {
-      await verifySlack(credentials);
-      return NextResponse.json({
-        ok: true,
-        message: "Connected — check the channel for the hello message.",
-      });
+      const detail = await verifySlack(credentials);
+      return NextResponse.json({ ok: true, message: `Connected: ${detail}.` });
     }
     return NextResponse.json({ ok: true, message: "Saved (no live test for this provider yet)." });
   } catch (e: any) {

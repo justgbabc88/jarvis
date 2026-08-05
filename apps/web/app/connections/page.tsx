@@ -45,9 +45,11 @@ const PROVIDERS: Record<
   },
   slack: {
     label: "Slack",
-    hint: "Daily briefing, tracker prompts, and agent reports post here. api.slack.com/apps → your app → Incoming Webhooks → pick a channel.",
+    hint: "Webhook = briefings, reports, tracker prompts & approval cards. Add the bot token + signing secret to also DM Jarvis questions and tap Approve/Reject in Slack (see DEPLOY.md → Slack).",
     fields: [
       { key: "webhook_url", label: "Incoming webhook URL", placeholder: "https://hooks.slack.com/services/…" },
+      { key: "bot_token", label: "Bot token (optional, for chat)", placeholder: "xoxb-…" },
+      { key: "signing_secret", label: "Signing secret (optional, for chat + buttons)", placeholder: "Slack app → Basic Information" },
     ],
   },
   email: {
