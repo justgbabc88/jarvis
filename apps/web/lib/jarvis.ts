@@ -442,6 +442,46 @@ const SET_PERSONA_TOOL: Anthropic.Tool = {
   },
 };
 
+const LIST_TASKS_TOOL: Anthropic.Tool = {
+  name: "list_tasks",
+  description:
+    "The owner's ClickUp tasks due today or overdue, with ids. Call before complete_task to find the right id.",
+  input_schema: { type: "object" as const, properties: {} },
+};
+
+const COMPLETE_TASK_TOOL: Anthropic.Tool = {
+  name: "complete_task",
+  description:
+    "Mark a ClickUp task as complete (sets the task's list-specific done status). Get the id from list_tasks. " +
+    "Reversible in ClickUp, so no approval needed — but confirm which task in your reply.",
+  input_schema: {
+    type: "object" as const,
+    properties: { task_id: { type: "string" } },
+    required: ["task_id"],
+  },
+};
+
+async function execTaskTool(name: string, input: any): Promise<unknown> {
+  const { getProviderCreds } = await import("./connectors");
+  const creds = await getProviderCreds<any>("clickup");
+  if (!creds?.api_token) return { ok: false, error: "no ClickUp connection configured" };
+  const { fetchClickUpTodayTasks, closeClickUpTask } = await import("./connectors/clickup");
+
+  if (name === "list_tasks") {
+    const tasks = await fetchClickUpTodayTasks(creds);
+    return tasks.map((t) => ({ id: t.id, name: t.name, list: t.listName, overdue: t.overdue, status: t.status }));
+  }
+
+  // complete_task
+  const done = await closeClickUpTask(creds, String(input.task_id));
+  await supabaseAdmin().from("activity_log").insert({
+    type: "task",
+    summary: `Marked ClickUp task “${done.name}” as ${done.status} (via chat).`,
+    meta: { via: "chat", task_id: String(input.task_id) },
+  });
+  return { ok: true, name: done.name, status: done.status };
+}
+
 const FIND_USER_TOOL: Anthropic.Tool = {
   name: "find_slack_user",
   description:
@@ -523,6 +563,7 @@ const ADMIN_RULES = [
   "A tracker can also post an owner-authored on_submit_message to its channel when the form is submitted (placeholders {mention} {name} {total}) — that's owner-configured automation and IS allowed from chat, e.g. a praise message when someone logs their numbers.",
   "If a channel prompt is set up, remind the owner to /invite the bot to that channel once.",
   "Call list_config first to find the right id; confirm what you changed in your reply.",
+  "You can mark the owner's ClickUp tasks complete: list_tasks → complete_task. Completing is reversible; confirm which task you closed.",
   "You can NOT delete anything, edit credentials, send, post, or spend from chat — for those, point the user to the Jarvis app (deletes/credentials) or remind them that agents queue such actions for approval.",
 ].join(" ");
 
@@ -568,8 +609,16 @@ export async function answerQuestion(
   // Non-owners get read-only questions + tracker logging; the owner gets
   // the full config toolkit (and sending, when enabled above).
   const tools = isOwner
-    ? [...ADMIN_TOOLS, SET_PERSONA_TOOL, SET_NAME_TOOL, FIND_USER_TOOL, ...(canSend ? [SEND_TOOL] : [])]
-    : ADMIN_TOOLS.filter((t) => ["list_config", "log_tracker"].includes(t.name));
+    ? [
+        ...ADMIN_TOOLS,
+        SET_PERSONA_TOOL,
+        SET_NAME_TOOL,
+        FIND_USER_TOOL,
+        LIST_TASKS_TOOL,
+        COMPLETE_TASK_TOOL,
+        ...(canSend ? [SEND_TOOL] : []),
+      ]
+    : [...ADMIN_TOOLS.filter((t) => ["list_config", "log_tracker"].includes(t.name)), LIST_TASKS_TOOL];
 
   const messages: Anthropic.MessageParam[] = [
     {
@@ -617,6 +666,10 @@ export async function answerQuestion(
                 ? isOwner
                   ? await execFindUser(tu.input)
                   : { ok: false, error: "owner only" }
+              : tu.name === "list_tasks" || tu.name === "complete_task"
+                ? tu.name === "complete_task" && !isOwner
+                  ? { ok: false, error: "only the owner can complete tasks (for now)" }
+                  : await execTaskTool(tu.name, tu.input)
               : ["set_persona", "set_assistant_name"].includes(tu.name) && !isOwner
                 ? { ok: false, error: "only the owner can change that" }
                 : await execAdminTool(tu.name, tu.input);

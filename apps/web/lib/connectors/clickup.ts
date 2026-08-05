@@ -64,6 +64,36 @@ export async function fetchClickUpLists(creds: ClickUpCreds): Promise<ClickUpLis
   return out;
 }
 
+/**
+ * Mark a task complete. ClickUp statuses are list-specific, so find the
+ * task's list, pick its "closed"/"done"-type status, and set it.
+ */
+export async function closeClickUpTask(
+  creds: ClickUpCreds,
+  taskId: string
+): Promise<{ name: string; status: string }> {
+  const task = await cu(`/task/${taskId}`, creds.api_token);
+  let statusName = "complete";
+  const listId = task.list?.id;
+  if (listId) {
+    const list = await cu(`/list/${listId}`, creds.api_token);
+    const statuses: any[] = list.statuses || [];
+    const target =
+      statuses.find((s) => s.type === "closed") ||
+      statuses.find((s) => s.type === "done") ||
+      statuses[statuses.length - 1];
+    if (target?.status) statusName = target.status;
+  }
+  const res = await fetch(`${API}/task/${taskId}`, {
+    method: "PUT",
+    headers: { Authorization: creds.api_token, "Content-Type": "application/json" },
+    body: JSON.stringify({ status: statusName }),
+  });
+  const json: any = await res.json().catch(() => ({}));
+  if (!res.ok || json.err) throw new Error(`ClickUp: ${json.err || `HTTP ${res.status}`}`);
+  return { name: task.name, status: statusName };
+}
+
 export async function fetchClickUpTodayTasks(creds: ClickUpCreds): Promise<ClickUpTask[]> {
   // End of today in the app timezone, as epoch ms.
   const endOfToday = new Date(`${ymd(new Date(), appTimezone())}T23:59:59`);
