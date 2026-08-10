@@ -138,3 +138,64 @@ export function funnelToText(f: GhlFunnel, range: DateRange): string {
   lines.push(`Total open pipeline value: $${(f.totalOpenValueCents / 100).toFixed(0)}`);
   return lines.join("\n");
 }
+
+export type StaleOpportunity = {
+  name: string;
+  pipeline: string;
+  stage: string;
+  valueCents: number;
+  daysStale: number;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+};
+
+/** Open opportunities untouched for N+ days — the deals dying of silence. */
+export async function fetchStaleOpportunities(
+  creds: GhlCreds,
+  daysStale: number
+): Promise<StaleOpportunity[]> {
+  const pipelines = await fetchGhlPipelines(creds);
+  const byPipeline = new Map(pipelines.map((p) => [p.id, p]));
+  const cutoff = Date.now() - daysStale * 86400000;
+
+  const out: StaleOpportunity[] = [];
+  let url = `/opportunities/search?location_id=${encodeURIComponent(creds.location_id)}&limit=100&status=open`;
+  let guard = 0;
+  while (url && guard++ < 15) {
+    const j = await ghl(creds, url);
+    for (const o of j.opportunities || []) {
+      if (String(o.status || "open").toLowerCase() !== "open") continue;
+      const updated = Date.parse(o.updatedAt || o.createdAt || "") || 0;
+      if (!updated || updated > cutoff) continue;
+      const p = byPipeline.get(o.pipelineId);
+      const c = o.contact || {};
+      out.push({
+        name: String(o.name || c.name || "(unnamed)"),
+        pipeline: p?.name || "unknown pipeline",
+        stage: p?.stages.get(o.pipelineStageId) || "unknown stage",
+        valueCents: Math.round(Number(o.monetaryValue || 0) * 100),
+        daysStale: Math.floor((Date.now() - updated) / 86400000),
+        contactName: c.name || o.contactName || undefined,
+        contactEmail: c.email || undefined,
+        contactPhone: c.phone || undefined,
+      });
+    }
+    url = j.meta?.nextPageUrl || "";
+  }
+  out.sort((a, b) => b.valueCents - a.valueCents || b.daysStale - a.daysStale);
+  return out.slice(0, 40);
+}
+
+export function staleToText(rows: StaleOpportunity[], daysStale: number): string {
+  if (rows.length === 0) return `STALE DEALS: none open and untouched for ${daysStale}+ days 🎉`;
+  const lines = [`STALE DEALS (open, untouched ${daysStale}+ days, by value):`];
+  for (const r of rows) {
+    lines.push(
+      `- ${r.name} · ${r.pipeline} / ${r.stage} · $${(r.valueCents / 100).toFixed(0)} · ${r.daysStale}d stale` +
+        (r.contactName ? ` · ${r.contactName}` : "") +
+        (r.contactEmail ? ` <${r.contactEmail}>` : "")
+    );
+  }
+  return lines.join("\n");
+}

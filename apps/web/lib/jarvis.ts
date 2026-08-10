@@ -525,6 +525,29 @@ export async function execGetFunnel(input: any): Promise<string> {
   return funnelToText(funnel, range);
 }
 
+const GET_STALE_DEALS_TOOL: Anthropic.Tool = {
+  name: "get_stale_deals",
+  description:
+    "Open GHL opportunities untouched for N+ days, with pipeline/stage, value, days stale, and contact " +
+    "name/email when available. The follow-up hit list — call before drafting chase emails.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      days_stale: { type: "number", description: "Minimum days untouched (default 4)" },
+    },
+  },
+};
+
+export async function execGetStaleDeals(input: any): Promise<string> {
+  const { getProviderCreds } = await import("./connectors");
+  const { fetchStaleOpportunities, staleToText } = await import("./connectors/ghl");
+  const creds = await getProviderCreds<any>("ghl");
+  if (!creds) return "No GoHighLevel connection configured — add one in Connections.";
+  const days = Math.min(Math.max(Number(input?.days_stale) || 4, 1), 60);
+  const rows = await fetchStaleOpportunities(creds, days);
+  return staleToText(rows, days);
+}
+
 const QUEUE_ACTION_TOOL: Anthropic.Tool = {
   name: "queue_action",
   description:
@@ -810,6 +833,7 @@ export async function answerQuestion(
         GET_HISTORY_TOOL,
         GET_AD_PERFORMANCE_TOOL,
         GET_FUNNEL_TOOL,
+        GET_STALE_DEALS_TOOL,
         QUEUE_ACTION_TOOL,
         SET_PERSONA_TOOL,
         SET_NAME_TOOL,
@@ -883,6 +907,10 @@ export async function answerQuestion(
               : tu.name === "get_funnel"
                 ? isOwner
                   ? await execGetFunnel(tu.input)
+                  : { ok: false, error: "owner only" }
+              : tu.name === "get_stale_deals"
+                ? isOwner
+                  ? await execGetStaleDeals(tu.input)
                   : { ok: false, error: "owner only" }
               : tu.name === "queue_action"
                 ? isOwner

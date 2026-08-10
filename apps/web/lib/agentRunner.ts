@@ -83,6 +83,16 @@ const CLIENT_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "get_stale_deals",
+    description:
+      "Open GHL opportunities untouched for N+ days with stage, value, and contact name/email — " +
+      "the follow-up hit list. Call before drafting chase emails.",
+    input_schema: {
+      type: "object" as const,
+      properties: { days_stale: { type: "number", description: "default 4" } },
+    },
+  },
+  {
     name: "create_tracker",
     description:
       "Create a daily tracker — a number the owner logs every day (e.g. 'Cold outreach sent'). " +
@@ -135,7 +145,7 @@ const CLIENT_TOOLS: Anthropic.Tool[] = [
 const WEB_SEARCH_TOOL = {
   type: "web_search_20250305",
   name: "web_search",
-  max_uses: 5,
+  max_uses: 8,
 } as any;
 
 async function execTool(name: string, input: any, ctx: RunContext): Promise<unknown> {
@@ -183,6 +193,11 @@ async function execTool(name: string, input: any, ctx: RunContext): Promise<unkn
   if (name === "get_funnel") {
     const { execGetFunnel } = await import("./jarvis");
     return await execGetFunnel(input);
+  }
+
+  if (name === "get_stale_deals") {
+    const { execGetStaleDeals } = await import("./jarvis");
+    return await execGetStaleDeals(input);
   }
 
   if (name === "create_tracker") {
@@ -402,7 +417,7 @@ async function executeJob(opts: {
     const approvalsLine = ctx.approvalsQueued
       ? `\n👉 ${ctx.approvalsQueued} action${ctx.approvalsQueued === 1 ? "" : "s"} waiting for your approval${appUrl("/approvals") ? `: ${appUrl("/approvals")}` : " — open Jarvis → Approvals"}`
       : "";
-    await notifySlack(`${head}\n${summary.slice(0, 500)}${approvalsLine}`);
+    await notifySlack(`${head}\n${summary.slice(0, 2900)}${approvalsLine}`);
   }
 
   return { runId: run.id, status, summary, approvalsQueued: ctx.approvalsQueued };
