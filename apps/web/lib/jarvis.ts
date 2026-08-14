@@ -548,6 +548,105 @@ export async function execGetStaleDeals(input: any): Promise<string> {
   return staleToText(rows, days);
 }
 
+const LIST_AGENTS_TOOL: Anthropic.Tool = {
+  name: "list_agents",
+  description:
+    "The owner's scheduled agents: id, name, what they do, cron schedule, enabled/paused, last run. " +
+    "Call before pausing, resuming, or rescheduling one.",
+  input_schema: { type: "object" as const, properties: {} },
+};
+
+const SET_AGENT_ENABLED_TOOL: Anthropic.Tool = {
+  name: "set_agent_enabled",
+  description:
+    "Pause (enabled=false) or resume (enabled=true) a scheduled agent. Fully reversible — a paused " +
+    "agent keeps its schedule and history, it just stops running until resumed. Get the id from list_agents.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      agent_id: { type: "string" },
+      enabled: { type: "boolean" },
+    },
+    required: ["agent_id", "enabled"],
+  },
+};
+
+const SET_AGENT_SCHEDULE_TOOL: Anthropic.Tool = {
+  name: "set_agent_schedule",
+  description:
+    "Change when a scheduled agent runs. Pass a 5-field cron expression evaluated in the owner's " +
+    "timezone (e.g. '0 5 * * *' = 5am daily, '0 6 * * 1' = 6am Mondays).",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      agent_id: { type: "string" },
+      schedule_cron: { type: "string", description: "5-field cron, owner's timezone" },
+    },
+    required: ["agent_id", "schedule_cron"],
+  },
+};
+
+async function execAgentTool(name: string, input: any): Promise<unknown> {
+  const db = supabaseAdmin();
+
+  if (name === "list_agents") {
+    const { data, error } = await db
+      .from("agents")
+      .select("id, name, description, schedule_cron, enabled, last_run_at")
+      .order("created_at");
+    if (error) return { ok: false, error: error.message };
+    return data;
+  }
+
+  if (name === "set_agent_enabled") {
+    const enabled = Boolean(input.enabled);
+    const { data, error } = await db
+      .from("agents")
+      .update({ enabled })
+      .eq("id", String(input.agent_id))
+      .select("name, schedule_cron")
+      .single();
+    if (error) return { ok: false, error: error.message };
+    await db.from("activity_log").insert({
+      type: "config",
+      summary: `${enabled ? "Resumed" : "Paused"} the “${data.name}” agent (via chat).`,
+      meta: { via: "chat", agent_id: String(input.agent_id), enabled },
+    });
+    return {
+      ok: true,
+      name: data.name,
+      enabled,
+      note: enabled
+        ? `Resumed — next run on schedule "${data.schedule_cron}".`
+        : "Paused — it keeps its schedule and history but won't run until resumed.",
+    };
+  }
+
+  // set_agent_schedule
+  const cron = String(input.schedule_cron || "").trim();
+  if (cron.split(/\s+/).length !== 5) {
+    return { ok: false, error: "schedule_cron must be a 5-field cron expression, e.g. '0 5 * * *'" };
+  }
+  const { data, error } = await db
+    .from("agents")
+    .update({ schedule_cron: cron })
+    .eq("id", String(input.agent_id))
+    .select("name, enabled")
+    .single();
+  if (error) return { ok: false, error: error.message };
+  await db.from("activity_log").insert({
+    type: "config",
+    summary: `Rescheduled the “${data.name}” agent to "${cron}" (via chat).`,
+    meta: { via: "chat", agent_id: String(input.agent_id), schedule_cron: cron },
+  });
+  return {
+    ok: true,
+    name: data.name,
+    schedule_cron: cron,
+    note: data.enabled ? "Live on the new schedule." : "Saved — the agent is still paused.",
+  };
+}
+
 const QUEUE_ACTION_TOOL: Anthropic.Tool = {
   name: "queue_action",
   description:
@@ -775,6 +874,7 @@ const ADMIN_RULES = [
   "If a channel prompt is set up, remind the owner to /invite the bot to that channel once.",
   "Call list_config first to find the right id; confirm what you changed in your reply.",
   "You can mark the owner's ClickUp tasks complete: list_tasks → complete_task. Completing is reversible; confirm which task you closed.",
+  "You can manage the owner's scheduled agents: list_agents → set_agent_enabled (pause/resume) or set_agent_schedule (change the cron). All reversible; confirm what you changed.",
   "For ad/funnel analysis use get_ad_performance (Meta campaigns/adsets: spend, CPL, CTR) and get_funnel (GHL pipeline stages, wins). When the owner asks to change a budget or stage a money/send action, use queue_action — it only QUEUES an approval card; nothing executes until the owner taps Approve. Cite the numbers that justify any queued action.",
   "You can NOT delete anything, edit credentials, send, post, or spend from chat — for those, point the user to the Jarvis app (deletes/credentials) or remind them that agents queue such actions for approval.",
 ].join(" ");
@@ -834,6 +934,9 @@ export async function answerQuestion(
         GET_AD_PERFORMANCE_TOOL,
         GET_FUNNEL_TOOL,
         GET_STALE_DEALS_TOOL,
+        LIST_AGENTS_TOOL,
+        SET_AGENT_ENABLED_TOOL,
+        SET_AGENT_SCHEDULE_TOOL,
         QUEUE_ACTION_TOOL,
         SET_PERSONA_TOOL,
         SET_NAME_TOOL,
@@ -911,6 +1014,10 @@ export async function answerQuestion(
               : tu.name === "get_stale_deals"
                 ? isOwner
                   ? await execGetStaleDeals(tu.input)
+                  : { ok: false, error: "owner only" }
+              : ["list_agents", "set_agent_enabled", "set_agent_schedule"].includes(tu.name)
+                ? isOwner
+                  ? await execAgentTool(tu.name, tu.input)
                   : { ok: false, error: "owner only" }
               : tu.name === "queue_action"
                 ? isOwner
