@@ -548,6 +548,99 @@ export async function execGetStaleDeals(input: any): Promise<string> {
   return staleToText(rows, days);
 }
 
+const LEAD_TOOLS: Anthropic.Tool[] = [
+  {
+    name: "get_leads",
+    description:
+      "The owner's saved leads (from prospecting agents), newest first, with status and the drafted opener. " +
+      "Use for 'how many leads', 'what's new', 'who haven't we contacted', or to read an opener aloud.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        status: {
+          type: "string",
+          description: "Filter: new | contacted | replied | booked | won | dead | all (default new)",
+        },
+        limit: { type: "number", description: "default 20, max 100" },
+      },
+    },
+  },
+  {
+    name: "save_leads",
+    description:
+      "Add prospects to the Leads list (deduped by business name + city). Use when the owner gives you " +
+      "prospects to record, or when you research some yourself.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        leads: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              business_name: { type: "string" },
+              trade: { type: "string" },
+              city: { type: "string" },
+              pain: { type: "string" },
+              channel: { type: "string" },
+              contact: { type: "string" },
+              opener: { type: "string" },
+            },
+            required: ["business_name"],
+          },
+        },
+      },
+      required: ["leads"],
+    },
+  },
+  {
+    name: "update_lead",
+    description:
+      "Change a lead's status (new | contacted | replied | booked | won | dead) or add a note. " +
+      "Use when the owner says things like 'mark Rodriguez Roofing as contacted'. Get ids from get_leads.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        lead_id: { type: "string" },
+        status: { type: "string" },
+        notes: { type: "string" },
+      },
+      required: ["lead_id"],
+    },
+  },
+];
+
+async function execLeadTool(name: string, input: any): Promise<unknown> {
+  const { listLeads, saveLeads, updateLead } = await import("./leads");
+
+  if (name === "get_leads") {
+    const limit = Math.min(Math.max(Number(input?.limit) || 20, 1), 100);
+    const rows = await listLeads({ status: input?.status || "new", limit });
+    return rows.map((l) => ({
+      id: l.id,
+      business: l.business_name,
+      trade: l.trade,
+      city: l.city,
+      pain: l.pain,
+      channel: l.channel,
+      contact: l.contact,
+      opener: l.opener,
+      status: l.status,
+    }));
+  }
+
+  if (name === "save_leads") {
+    const leads = Array.isArray(input?.leads) ? input.leads : [];
+    if (leads.length === 0) return { ok: false, error: "leads array is required" };
+    const r = await saveLeads(leads, { source: "chat" });
+    return { ok: true, ...r };
+  }
+
+  // update_lead
+  await updateLead(String(input.lead_id), { status: input.status, notes: input.notes });
+  return { ok: true, note: "Lead updated." };
+}
+
 const LIST_AGENTS_TOOL: Anthropic.Tool = {
   name: "list_agents",
   description:
@@ -875,6 +968,7 @@ const ADMIN_RULES = [
   "Call list_config first to find the right id; confirm what you changed in your reply.",
   "You can mark the owner's ClickUp tasks complete: list_tasks → complete_task. Completing is reversible; confirm which task you closed.",
   "You can manage the owner's scheduled agents: list_agents → set_agent_enabled (pause/resume) or set_agent_schedule (change the cron). All reversible; confirm what you changed.",
+  "Prospecting agents save what they find to the Leads list. Use get_leads to read it, update_lead to change a lead's status, and save_leads to add prospects. The owner can export the whole list as a CSV (a spreadsheet) from the Leads page in the app.",
   "For ad/funnel analysis use get_ad_performance (Meta campaigns/adsets: spend, CPL, CTR) and get_funnel (GHL pipeline stages, wins). When the owner asks to change a budget or stage a money/send action, use queue_action — it only QUEUES an approval card; nothing executes until the owner taps Approve. Cite the numbers that justify any queued action.",
   "You can NOT delete anything, edit credentials, send, post, or spend from chat — for those, point the user to the Jarvis app (deletes/credentials) or remind them that agents queue such actions for approval.",
 ].join(" ");
@@ -934,6 +1028,7 @@ export async function answerQuestion(
         GET_AD_PERFORMANCE_TOOL,
         GET_FUNNEL_TOOL,
         GET_STALE_DEALS_TOOL,
+        ...LEAD_TOOLS,
         LIST_AGENTS_TOOL,
         SET_AGENT_ENABLED_TOOL,
         SET_AGENT_SCHEDULE_TOOL,
@@ -1014,6 +1109,10 @@ export async function answerQuestion(
               : tu.name === "get_stale_deals"
                 ? isOwner
                   ? await execGetStaleDeals(tu.input)
+                  : { ok: false, error: "owner only" }
+              : ["get_leads", "save_leads", "update_lead"].includes(tu.name)
+                ? isOwner
+                  ? await execLeadTool(tu.name, tu.input)
                   : { ok: false, error: "owner only" }
               : ["list_agents", "set_agent_enabled", "set_agent_schedule"].includes(tu.name)
                 ? isOwner

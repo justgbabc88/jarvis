@@ -93,6 +93,35 @@ const CLIENT_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "save_leads",
+    description:
+      "Save prospects to the owner's Leads list so they persist as a working list (deduped by business " +
+      "name + city — re-runs never create duplicates). ALWAYS call this with every prospect you find, " +
+      "before writing your final report. Include the drafted opener with each lead.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        leads: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              business_name: { type: "string" },
+              trade: { type: "string", description: "roofing, HVAC, plumbing…" },
+              city: { type: "string" },
+              pain: { type: "string", description: "The evidenced gap, with the specifics you found" },
+              channel: { type: "string", description: "Instagram / Facebook / website / phone" },
+              contact: { type: "string", description: "handle, URL, or number" },
+              opener: { type: "string", description: "The personalized first message, ready to send" },
+            },
+            required: ["business_name"],
+          },
+        },
+      },
+      required: ["leads"],
+    },
+  },
+  {
     name: "create_tracker",
     description:
       "Create a daily tracker — a number the owner logs every day (e.g. 'Cold outreach sent'). " +
@@ -198,6 +227,22 @@ async function execTool(name: string, input: any, ctx: RunContext): Promise<unkn
   if (name === "get_stale_deals") {
     const { execGetStaleDeals } = await import("./jarvis");
     return await execGetStaleDeals(input);
+  }
+
+  if (name === "save_leads") {
+    const { saveLeads } = await import("./leads");
+    const leads = Array.isArray(input?.leads) ? input.leads : [];
+    if (leads.length === 0) return { ok: false, error: "leads array is required" };
+    const r = await saveLeads(leads, {
+      source: "agent",
+      businessId: ctx.businessId,
+      agentRunId: ctx.runId,
+    });
+    return {
+      ok: true,
+      ...r,
+      note: `${r.saved} new lead(s) saved to the Leads page${r.skipped ? `, ${r.skipped} already on the list` : ""}.`,
+    };
   }
 
   if (name === "create_tracker") {
