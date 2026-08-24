@@ -38,16 +38,50 @@ async function execEmailSend(payload: any): Promise<ExecutionResult> {
       message: "No email connection. Add one in Connections (SMTP host + app password), then re-approve.",
     };
   }
+  let body = String(payload.body || payload.text || "");
+
+  // Cold outreach (a lead_id is present) gets the owner's configured
+  // sign-off appended — business identity, postal address, and opt-out
+  // line, which CAN-SPAM requires on commercial email.
+  if (payload.lead_id) {
+    const { data } = await supabaseAdmin()
+      .from("app_settings")
+      .select("value")
+      .eq("key", "outreach_footer")
+      .maybeSingle();
+    const footer = (data?.value as any)?.text;
+    if (typeof footer === "string" && footer.trim()) {
+      body = `${body.trimEnd()}\n\n--\n${footer.trim()}`;
+    } else {
+      return {
+        status: "failed",
+        message:
+          "Outreach email blocked: no sign-off configured. Ask Jarvis to 'set the outreach footer' with your business name, postal address, and an opt-out line (CAN-SPAM requires it on cold email).",
+      };
+    }
+  }
+
   const res = await sendEmail(creds, {
     to: String(payload.to || ""),
     subject: String(payload.subject || ""),
-    body: String(payload.body || payload.text || ""),
+    body,
     cc: payload.cc ? String(payload.cc) : undefined,
     bcc: payload.bcc ? String(payload.bcc) : undefined,
   });
+
+  // Sending to a lead advances it on the Leads page automatically.
+  if (payload.lead_id) {
+    try {
+      const { updateLead } = await import("./leads");
+      await updateLead(String(payload.lead_id), { status: "contacted" });
+    } catch (e) {
+      console.error("[actions] lead status update failed:", (e as Error).message);
+    }
+  }
+
   return {
     status: "executed",
-    message: `Email sent to ${payload.to}.`,
+    message: `Email sent to ${payload.to}.${payload.lead_id ? " Lead marked contacted." : ""}`,
     detail: { message_id: res.messageId, accepted: res.accepted },
   };
 }

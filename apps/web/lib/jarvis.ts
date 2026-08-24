@@ -641,6 +641,125 @@ async function execLeadTool(name: string, input: any): Promise<unknown> {
   return { ok: true, note: "Lead updated." };
 }
 
+const OUTREACH_TOOLS: Anthropic.Tool[] = [
+  {
+    name: "queue_lead_emails",
+    description:
+      "Queue cold-outreach emails to leads for the owner's approval — NOTHING sends until they tap Approve. " +
+      "Only works for leads whose contact holds an email address (call get_leads first). Write each email " +
+      "yourself from the lead's evidenced pain and its saved opener: short, plain text, one specific " +
+      "observation about THEIR business, one clear ask. No images, no links unless asked, no hype. " +
+      "The owner's configured sign-off (business name, address, opt-out) is appended automatically on send. " +
+      "Max 10 per call — cold email works in small, personal batches, not blasts.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        emails: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              lead_id: { type: "string", description: "From get_leads" },
+              to: { type: "string", description: "The lead's email address" },
+              subject: { type: "string", description: "Short, specific, non-salesy" },
+              body: { type: "string", description: "The full email text, ready to send" },
+            },
+            required: ["lead_id", "to", "subject", "body"],
+          },
+        },
+      },
+      required: ["emails"],
+    },
+  },
+  {
+    name: "set_outreach_footer",
+    description:
+      "Set the sign-off appended to every outreach email — business name, postal address, and an opt-out " +
+      "line. Required before cold emails can send (CAN-SPAM). Call when the owner gives you these details.",
+    input_schema: {
+      type: "object" as const,
+      properties: { text: { type: "string", description: "The full sign-off block" } },
+      required: ["text"],
+    },
+  },
+];
+
+async function execOutreachTool(name: string, input: any): Promise<unknown> {
+  const db = supabaseAdmin();
+
+  if (name === "set_outreach_footer") {
+    const text = String(input.text || "").trim();
+    if (!text) return { ok: false, error: "text is required" };
+    const { error } = await db
+      .from("app_settings")
+      .upsert(
+        { key: "outreach_footer", value: { text }, updated_at: new Date().toISOString() },
+        { onConflict: "key" }
+      );
+    if (error) return { ok: false, error: error.message };
+    await db.from("activity_log").insert({
+      type: "config",
+      summary: "Set the outreach email sign-off (via chat).",
+      meta: { via: "chat" },
+    });
+    return { ok: true, note: "Saved — outreach emails can now be approved and sent." };
+  }
+
+  // queue_lead_emails
+  const emails = Array.isArray(input?.emails) ? input.emails.slice(0, 10) : [];
+  if (emails.length === 0) return { ok: false, error: "emails array is required" };
+
+  const { data: footerRow } = await db
+    .from("app_settings")
+    .select("value")
+    .eq("key", "outreach_footer")
+    .maybeSingle();
+  const hasFooter = Boolean((footerRow?.value as any)?.text);
+
+  const { notifySlackApproval } = await import("./notify");
+  const queued: string[] = [];
+  for (const e of emails) {
+    const to = String(e.to || "").trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) continue;
+    const { data, error } = await db
+      .from("approvals")
+      .insert({
+        kind: "send",
+        title: `Cold outreach: ${to}`,
+        detail: String(e.subject || "").slice(0, 300),
+        payload: {
+          action: "email.send",
+          to,
+          subject: String(e.subject || ""),
+          body: String(e.body || ""),
+          lead_id: String(e.lead_id || ""),
+        },
+        status: "pending",
+      })
+      .select("id")
+      .single();
+    if (error || !data) continue;
+    queued.push(to);
+    await notifySlackApproval({
+      id: data.id,
+      kind: "send",
+      title: `Cold outreach: ${to}`,
+      detail: String(e.subject || ""),
+      amount_cents: null,
+    });
+  }
+
+  return {
+    ok: true,
+    queued: queued.length,
+    recipients: queued,
+    footer_configured: hasFooter,
+    note: hasFooter
+      ? `${queued.length} email(s) QUEUED for approval — none sent yet. Approving each one sends it and marks the lead contacted.`
+      : `${queued.length} email(s) queued, but NO SIGN-OFF IS CONFIGURED — approving them will fail until the owner provides a business name, postal address, and opt-out line for set_outreach_footer. Ask for those now.`,
+  };
+}
+
 const LIST_AGENTS_TOOL: Anthropic.Tool = {
   name: "list_agents",
   description:
@@ -969,6 +1088,7 @@ const ADMIN_RULES = [
   "You can mark the owner's ClickUp tasks complete: list_tasks → complete_task. Completing is reversible; confirm which task you closed.",
   "You can manage the owner's scheduled agents: list_agents → set_agent_enabled (pause/resume) or set_agent_schedule (change the cron). All reversible; confirm what you changed.",
   "Prospecting agents save what they find to the Leads list. Use get_leads to read it, update_lead to change a lead's status, and save_leads to add prospects. The owner can export the whole list as a CSV (a spreadsheet) from the Leads page in the app.",
+  "To email leads: get_leads → queue_lead_emails (owner-only). This only QUEUES approval cards; the owner taps Approve to send, and the lead is then marked contacted automatically. Keep cold emails short, plain, and specific to that business — and keep batches small (10 or fewer at a time) to protect deliverability. If no outreach sign-off is configured, ask the owner for their business name, postal address, and opt-out line and save it with set_outreach_footer.",
   "For ad/funnel analysis use get_ad_performance (Meta campaigns/adsets: spend, CPL, CTR) and get_funnel (GHL pipeline stages, wins). When the owner asks to change a budget or stage a money/send action, use queue_action — it only QUEUES an approval card; nothing executes until the owner taps Approve. Cite the numbers that justify any queued action.",
   "You can NOT delete anything, edit credentials, send, post, or spend from chat — for those, point the user to the Jarvis app (deletes/credentials) or remind them that agents queue such actions for approval.",
 ].join(" ");
@@ -1029,6 +1149,7 @@ export async function answerQuestion(
         GET_FUNNEL_TOOL,
         GET_STALE_DEALS_TOOL,
         ...LEAD_TOOLS,
+        ...OUTREACH_TOOLS,
         LIST_AGENTS_TOOL,
         SET_AGENT_ENABLED_TOOL,
         SET_AGENT_SCHEDULE_TOOL,
@@ -1113,6 +1234,10 @@ export async function answerQuestion(
               : ["get_leads", "save_leads", "update_lead"].includes(tu.name)
                 ? isOwner
                   ? await execLeadTool(tu.name, tu.input)
+                  : { ok: false, error: "owner only" }
+              : ["queue_lead_emails", "set_outreach_footer"].includes(tu.name)
+                ? isOwner
+                  ? await execOutreachTool(tu.name, tu.input)
                   : { ok: false, error: "owner only" }
               : ["list_agents", "set_agent_enabled", "set_agent_schedule"].includes(tu.name)
                 ? isOwner
