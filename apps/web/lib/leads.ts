@@ -54,10 +54,11 @@ export async function saveLeads(
     }));
   if (clean.length === 0) return { saved: 0, skipped: 0, names: [] };
 
-  // ignoreDuplicates → the unique index quietly drops repeats.
+  // Dedupe on the generated `dedupe_key` column (lower(name)|lower(city)) —
+  // it carries a real unique constraint, which ON CONFLICT requires.
   const { data, error } = await db
     .from("leads")
-    .upsert(clean, { onConflict: "business_name,city", ignoreDuplicates: true })
+    .upsert(clean, { onConflict: "dedupe_key", ignoreDuplicates: true })
     .select("business_name");
   if (error) throw new Error(error.message);
 
