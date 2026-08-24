@@ -650,7 +650,8 @@ const OUTREACH_TOOLS: Anthropic.Tool[] = [
       "yourself from the lead's evidenced pain and its saved opener: short, plain text, one specific " +
       "observation about THEIR business, one clear ask. No images, no links unless asked, no hype. " +
       "The owner's configured sign-off (business name, address, opt-out) is appended automatically on send. " +
-      "Max 10 per call — cold email works in small, personal batches, not blasts.",
+      "Max 10 per call. The owner's target is about 10 outreach emails per DAY — the result reports how many " +
+      "went out in the last 24h; if a batch would push past that, say so and suggest saving the rest for tomorrow.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -709,6 +710,25 @@ async function execOutreachTool(name: string, input: any): Promise<unknown> {
   const emails = Array.isArray(input?.emails) ? input.emails.slice(0, 10) : [];
   if (emails.length === 0) return { ok: false, error: "emails array is required" };
 
+  // Pace check — outreach volume is a deliverability lever, and the
+  // owner's target is ~10/day. Count what's already out or waiting.
+  const dayAgo = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const [{ count: sentToday }, { count: pendingNow }] = await Promise.all([
+    db
+      .from("approvals")
+      .select("id", { count: "exact", head: true })
+      .eq("execution_status", "executed")
+      .not("payload->>lead_id", "is", null)
+      .gte("executed_at", dayAgo),
+    db
+      .from("approvals")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "pending")
+      .not("payload->>lead_id", "is", null),
+  ]);
+  const sent = sentToday || 0;
+  const waiting = pendingNow || 0;
+
   const { data: footerRow } = await db
     .from("app_settings")
     .select("value")
@@ -749,14 +769,23 @@ async function execOutreachTool(name: string, input: any): Promise<unknown> {
     });
   }
 
+  const dayTotal = sent + waiting + queued.length;
+  const paceNote =
+    dayTotal > 10
+      ? ` PACE WARNING: ${sent} sent in the last 24h + ${waiting} already awaiting approval + ${queued.length} new = ${dayTotal}, above the ~10/day target. Tell the owner and suggest holding the rest for tomorrow.`
+      : ` Pace: ${sent} sent in the last 24h, ${waiting + queued.length} now awaiting approval (target ~10/day).`;
+
   return {
     ok: true,
     queued: queued.length,
     recipients: queued,
     footer_configured: hasFooter,
-    note: hasFooter
-      ? `${queued.length} email(s) QUEUED for approval — none sent yet. Approving each one sends it and marks the lead contacted.`
-      : `${queued.length} email(s) queued, but NO SIGN-OFF IS CONFIGURED — approving them will fail until the owner provides a business name, postal address, and opt-out line for set_outreach_footer. Ask for those now.`,
+    sent_last_24h: sent,
+    note:
+      (hasFooter
+        ? `${queued.length} email(s) QUEUED for approval — none sent yet. Approving each one sends it and marks the lead contacted.`
+        : `${queued.length} email(s) queued, but NO SIGN-OFF IS CONFIGURED — approving them will fail until the owner provides a business name, postal address, and opt-out line for set_outreach_footer. Ask for those now.`) +
+      paceNote,
   };
 }
 
