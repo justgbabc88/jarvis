@@ -812,6 +812,23 @@ const SET_AGENT_ENABLED_TOOL: Anthropic.Tool = {
   },
 };
 
+const UPDATE_AGENT_PROMPT_TOOL: Anthropic.Tool = {
+  name: "update_agent_prompt",
+  description:
+    "Rewrite a scheduled agent's instructions (the job description it follows on every run). Use for " +
+    "requests like 'stop mentioning X', 'focus on roofing in Texas', 'ask for 15 prospects'. " +
+    "ALWAYS call list_agents first and preserve everything the owner didn't ask to change — you are " +
+    "rewriting the full prompt, so echo the existing instructions back with just the requested edit applied.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      agent_id: { type: "string" },
+      system_prompt: { type: "string", description: "The complete new instructions" },
+    },
+    required: ["agent_id", "system_prompt"],
+  },
+};
+
 const SET_AGENT_SCHEDULE_TOOL: Anthropic.Tool = {
   name: "set_agent_schedule",
   description:
@@ -831,12 +848,33 @@ async function execAgentTool(name: string, input: any): Promise<unknown> {
   const db = supabaseAdmin();
 
   if (name === "list_agents") {
+    // system_prompt included so an edit can preserve what isn't changing.
     const { data, error } = await db
       .from("agents")
-      .select("id, name, description, schedule_cron, enabled, last_run_at")
+      .select("id, name, description, schedule_cron, enabled, last_run_at, system_prompt")
       .order("created_at");
     if (error) return { ok: false, error: error.message };
     return data;
+  }
+
+  if (name === "update_agent_prompt") {
+    const prompt = String(input.system_prompt || "").trim();
+    if (prompt.length < 40) {
+      return { ok: false, error: "system_prompt looks too short — send the complete instructions" };
+    }
+    const { data, error } = await db
+      .from("agents")
+      .update({ system_prompt: prompt })
+      .eq("id", String(input.agent_id))
+      .select("name")
+      .single();
+    if (error) return { ok: false, error: error.message };
+    await db.from("activity_log").insert({
+      type: "config",
+      summary: `Updated the “${data.name}” agent's instructions (via chat).`,
+      meta: { via: "chat", agent_id: String(input.agent_id) },
+    });
+    return { ok: true, name: data.name, note: "Applied — takes effect on the agent's next run." };
   }
 
   if (name === "set_agent_enabled") {
@@ -1115,7 +1153,7 @@ const ADMIN_RULES = [
   "If a channel prompt is set up, remind the owner to /invite the bot to that channel once.",
   "Call list_config first to find the right id; confirm what you changed in your reply.",
   "You can mark the owner's ClickUp tasks complete: list_tasks → complete_task. Completing is reversible; confirm which task you closed.",
-  "You can manage the owner's scheduled agents: list_agents → set_agent_enabled (pause/resume) or set_agent_schedule (change the cron). All reversible; confirm what you changed.",
+  "You can manage the owner's scheduled agents: list_agents → set_agent_enabled (pause/resume), set_agent_schedule (change the cron), or update_agent_prompt (rewrite what the agent does — preserve everything not being changed). All reversible; confirm what you changed.",
   "Prospecting agents save what they find to the Leads list. Use get_leads to read it, update_lead to change a lead's status, and save_leads to add prospects. The owner can export the whole list as a CSV (a spreadsheet) from the Leads page in the app.",
   "To email leads: get_leads → queue_lead_emails (owner-only). This only QUEUES approval cards; the owner taps Approve to send, and the lead is then marked contacted automatically. Keep cold emails short, plain, and specific to that business — and keep batches small (10 or fewer at a time) to protect deliverability. If no outreach sign-off is configured, ask the owner for their business name, postal address, and opt-out line and save it with set_outreach_footer.",
   "For ad/funnel analysis use get_ad_performance (Meta campaigns/adsets: spend, CPL, CTR) and get_funnel (GHL pipeline stages, wins). When the owner asks to change a budget or stage a money/send action, use queue_action — it only QUEUES an approval card; nothing executes until the owner taps Approve. Cite the numbers that justify any queued action.",
@@ -1182,6 +1220,7 @@ export async function answerQuestion(
         LIST_AGENTS_TOOL,
         SET_AGENT_ENABLED_TOOL,
         SET_AGENT_SCHEDULE_TOOL,
+        UPDATE_AGENT_PROMPT_TOOL,
         QUEUE_ACTION_TOOL,
         SET_PERSONA_TOOL,
         SET_NAME_TOOL,
@@ -1213,9 +1252,13 @@ export async function answerQuestion(
 
   try {
     for (let turn = 0; turn < 5; turn++) {
+      // NOTE: Sonnet 5 runs adaptive thinking by default, and max_tokens
+      // caps thinking + visible text TOGETHER. A tight budget let a
+      // reasoning-heavy turn spend everything on thinking and return no
+      // text at all, which surfaced as "(no answer)". Give it room.
       const res = await anthropic().messages.create({
         model,
-        max_tokens: 800,
+        max_tokens: 4000,
         system: cachedSystem as any,
         tools: cachedTools,
         messages,
@@ -1226,13 +1269,20 @@ export async function answerQuestion(
         (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
       );
       if (res.stop_reason !== "tool_use" || toolUses.length === 0) {
-        return (
-          res.content
-            .filter((b): b is Anthropic.TextBlock => b.type === "text")
-            .map((b) => b.text)
-            .join("\n")
-            .trim() || "(no answer)"
-        );
+        const text = res.content
+          .filter((b): b is Anthropic.TextBlock => b.type === "text")
+          .map((b) => b.text)
+          .join("\n")
+          .trim();
+        if (text) return text;
+        // No text came back — say what happened instead of a bare blank.
+        console.error("[jarvis] empty reply", {
+          stop_reason: res.stop_reason,
+          usage: res.usage,
+        });
+        return res.stop_reason === "max_tokens"
+          ? "I ran out of room working that one out — ask me again, or break it into two smaller asks."
+          : "I couldn't put a reply together for that one. Try rephrasing it?";
       }
 
       const results: Anthropic.ToolResultBlockParam[] = [];
@@ -1268,7 +1318,7 @@ export async function answerQuestion(
                 ? isOwner
                   ? await execOutreachTool(tu.name, tu.input)
                   : { ok: false, error: "owner only" }
-              : ["list_agents", "set_agent_enabled", "set_agent_schedule"].includes(tu.name)
+              : ["list_agents", "set_agent_enabled", "set_agent_schedule", "update_agent_prompt"].includes(tu.name)
                 ? isOwner
                   ? await execAgentTool(tu.name, tu.input)
                   : { ok: false, error: "owner only" }
